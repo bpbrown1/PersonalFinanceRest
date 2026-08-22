@@ -46,6 +46,9 @@ public class FinancialAccount {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "archived_at")
+    private Instant archivedAt;
+
     protected FinancialAccount() {
     }
 
@@ -106,5 +109,31 @@ public class FinancialAccount {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public Instant getArchivedAt() {
+        return archivedAt;
+    }
+
+    public AccountStatus getStatus() {
+        return archivedAt == null ? AccountStatus.ACTIVE : AccountStatus.ARCHIVED;
+    }
+
+    void update(String name, AccountType type, String currency, LocalDate openingDate, BigDecimal openingBalance) {
+        this.name = name;
+        this.type = type;
+        this.currency = currency;
+        this.openingDate = openingDate;
+        this.openingBalance = openingBalance;
+    }
+
+    void archive(Instant archivedAt) {
+        if (this.archivedAt == null) {
+            this.archivedAt = archivedAt;
+        }
+    }
+
+    void restore() {
+        archivedAt = null;
     }
 }

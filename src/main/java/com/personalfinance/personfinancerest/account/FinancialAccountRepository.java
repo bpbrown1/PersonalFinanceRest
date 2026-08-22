@@ -10,5 +10,9 @@ interface FinancialAccountRepository extends JpaRepository<FinancialAccount, UUI
 
     List<FinancialAccount> findAllByOwnerIdOrderByCreatedAtAsc(UUID ownerId);
 
+    List<FinancialAccount> findAllByOwnerIdAndArchivedAtIsNullOrderByCreatedAtAsc(UUID ownerId);
+
+    List<FinancialAccount> findAllByOwnerIdAndArchivedAtIsNotNullOrderByCreatedAtAsc(UUID ownerId);
+
     Optional<FinancialAccount> findByIdAndOwnerId(UUID id, UUID ownerId);
 }

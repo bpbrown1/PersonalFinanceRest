@@ -1,6 +1,8 @@
 package com.personalfinance.personfinancerest.web;
 
 import com.personalfinance.personfinancerest.account.FinancialAccountNotFoundException;
+import com.personalfinance.personfinancerest.account.FinancialAccountInUseException;
+import com.personalfinance.personfinancerest.account.InvalidAccountStatusException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -14,6 +16,22 @@ import java.util.Map;
 
 @RestControllerAdvice
 class ApiExceptionHandler {
+
+    @ExceptionHandler(FinancialAccountInUseException.class)
+    ResponseEntity<ApiError> handleFinancialAccountInUse(FinancialAccountInUseException exception) {
+        ApiError response = new ApiError(
+                Instant.now(),
+                HttpStatus.CONFLICT.value(),
+                exception.getMessage(),
+                Map.of()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler(InvalidAccountStatusException.class)
+    ResponseEntity<ApiError> handleInvalidAccountStatus(InvalidAccountStatusException exception) {
+        return badRequest("Validation failed", Map.of("status", exception.getMessage()));
+    }
 
     @ExceptionHandler(FinancialAccountNotFoundException.class)
     ResponseEntity<ApiError> handleFinancialAccountNotFound(FinancialAccountNotFoundException exception) {

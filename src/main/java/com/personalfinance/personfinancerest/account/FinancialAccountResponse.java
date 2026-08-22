@@ -13,6 +13,9 @@ public record FinancialAccountResponse(
         String currency,
         LocalDate openingDate,
         BigDecimal openingBalance,
+        BigDecimal currentBalance,
+        AccountStatus status,
+        Instant archivedAt,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -25,6 +28,9 @@ public record FinancialAccountResponse(
                 account.getCurrency(),
                 account.getOpeningDate(),
                 account.getOpeningBalance(),
+                account.getOpeningBalance(),
+                account.getStatus(),
+                account.getArchivedAt(),
                 account.getCreatedAt(),
                 account.getUpdatedAt()
         );

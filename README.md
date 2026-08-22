@@ -49,6 +49,9 @@ A successful request returns `201 Created`, a `Location` header, and the created
   "currency": "USD",
   "openingDate": "2026-08-20",
   "openingBalance": 1250.75,
+  "currentBalance": 1250.75,
+  "status": "active",
+  "archivedAt": null,
   "createdAt": "2026-08-22T18:30:00Z",
   "updatedAt": "2026-08-22T18:30:00Z"
 }
@@ -56,8 +59,32 @@ A successful request returns `201 Created`, a `Location` header, and the created
 
 ### Retrieve accounts
 
-- `GET /api/v1/accounts` returns the current user's accounts as a JSON array, ordered by creation time.
+- `GET /api/v1/accounts` returns the current user's active accounts as a JSON array, ordered by creation time.
+- `GET /api/v1/accounts?status=archived` returns archived accounts.
+- `GET /api/v1/accounts?status=all` returns active and archived accounts.
 - `GET /api/v1/accounts/{accountId}` returns one account owned by the current user.
+
+`currentBalance` initially equals `openingBalance`. The response field remains stable when transaction activity later becomes part of the calculation.
+
+### Maintain an account
+
+`PATCH /api/v1/accounts/{accountId}` updates one or more supplied fields:
+
+```json
+{
+  "name": "Primary Checking",
+  "type": "checking"
+}
+```
+
+Name and type remain editable after account activity exists. Currency, opening date, and opening balance may only change before financial activity references the account; conflicting changes return `409 Conflict`.
+
+Account lifecycle operations are explicit and idempotent:
+
+- `POST /api/v1/accounts/{accountId}/archive` soft-archives an account.
+- `POST /api/v1/accounts/{accountId}/restore` restores an archived account.
+
+There is intentionally no permanent-delete endpoint. Archiving preserves the account identifier and its current or future financial history.
 
 The initial application uses a seeded default user. The ownership boundary remains in the API and persistence model so authentication can replace that user later.
 
@@ -79,5 +106,6 @@ All documented API errors use this shape:
 - Invalid fields return `400` with `error` set to `Validation failed` and entries in `fieldErrors`.
 - Malformed JSON or unsupported enum values return `400` with `error` set to `Request body is malformed`.
 - A valid but unknown account ID returns `404` with `error` set to `Financial account not found: {accountId}` and an empty `fieldErrors` object.
+- Attempts to change currency or opening terms after financial activity exists return `409` with an empty `fieldErrors` object.
 
 Clients should use `status` and `fieldErrors` for behavior rather than parsing the human-readable `error` text.
