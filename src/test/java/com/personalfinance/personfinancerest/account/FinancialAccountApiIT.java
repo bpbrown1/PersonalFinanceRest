@@ -1,5 +1,6 @@
 package com.personalfinance.personfinancerest.account;
 
+import com.personalfinance.personfinancerest.user.CurrentUserProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,8 +10,11 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -18,13 +22,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
-class FinancialAccountApiIntegrationTests {
+class FinancialAccountApiIT {
 
     @Autowired
     private MockMvc mockMvc;
 
     @Autowired
     private FinancialAccountRepository repository;
+
+    @Autowired
+    private CurrentUserProvider currentUserProvider;
 
     @BeforeEach
     void clearAccounts() {
@@ -47,7 +54,7 @@ class FinancialAccountApiIntegrationTests {
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", org.hamcrest.Matchers.matchesPattern("/api/v1/accounts/.+")))
                 .andExpect(jsonPath("$.id").isNotEmpty())
-                .andExpect(jsonPath("$.ownerId").value(FinancialAccountService.DEFAULT_OWNER_ID.toString()))
+                .andExpect(jsonPath("$.ownerId").value(currentUserProvider.userId().toString()))
                 .andExpect(jsonPath("$.name").value("Everyday Checking"))
                 .andExpect(jsonPath("$.type").value("checking"))
                 .andExpect(jsonPath("$.currency").value("USD"))
@@ -120,5 +127,61 @@ class FinancialAccountApiIntegrationTests {
                 .andExpect(jsonPath("$.error").value("Request body is malformed"));
 
         assertThat(repository.count()).isZero();
+    }
+
+    @Test
+    void retrievesCreatedAccounts() throws Exception {
+        createAccount("Everyday Checking", "checking");
+        createAccount("Emergency Savings", "savings");
+
+        mockMvc.perform(get("/api/v1/accounts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].name").value("Everyday Checking"))
+                .andExpect(jsonPath("$[1].name").value("Emergency Savings"));
+
+        UUID accountId = repository.findAll().getFirst().getId();
+
+        mockMvc.perform(get("/api/v1/accounts/{accountId}", accountId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(accountId.toString()))
+                .andExpect(jsonPath("$.ownerId").value(currentUserProvider.userId().toString()));
+    }
+
+    @Test
+    void returnsStableNotFoundErrorForUnknownAccount() throws Exception {
+        UUID unknownAccountId = UUID.randomUUID();
+
+        mockMvc.perform(get("/api/v1/accounts/{accountId}", unknownAccountId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.timestamp").isNotEmpty())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.error").value("Financial account not found: " + unknownAccountId))
+                .andExpect(jsonPath("$.fieldErrors").isEmpty());
+    }
+
+    @Test
+    void allowsCorsPreflightFromConfiguredAngularOrigin() throws Exception {
+        mockMvc.perform(options("/api/v1/accounts")
+                        .header("Origin", "http://localhost:4200")
+                        .header("Access-Control-Request-Method", "GET"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:4200"))
+                .andExpect(header().string("Access-Control-Allow-Methods",
+                        org.hamcrest.Matchers.containsString("GET")));
+    }
+
+    private void createAccount(String name, String type) throws Exception {
+        mockMvc.perform(post("/api/v1/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "%s",
+                                  "type": "%s",
+                                  "currency": "USD",
+                                  "openingDate": "2026-08-20"
+                                }
+                                """.formatted(name, type)))
+                .andExpect(status().isCreated());
     }
 }

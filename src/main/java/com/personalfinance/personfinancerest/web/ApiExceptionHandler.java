@@ -1,5 +1,6 @@
 package com.personalfinance.personfinancerest.web;
 
+import com.personalfinance.personfinancerest.account.FinancialAccountNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -13,6 +14,17 @@ import java.util.Map;
 
 @RestControllerAdvice
 class ApiExceptionHandler {
+
+    @ExceptionHandler(FinancialAccountNotFoundException.class)
+    ResponseEntity<ApiError> handleFinancialAccountNotFound(FinancialAccountNotFoundException exception) {
+        ApiError response = new ApiError(
+                Instant.now(),
+                HttpStatus.NOT_FOUND.value(),
+                exception.getMessage(),
+                Map.of()
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+    }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException exception) {
