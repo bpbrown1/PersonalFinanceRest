@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -15,12 +16,15 @@ class FinancialAccountService {
     private final FinancialAccountRepository repository;
     private final CurrentUserProvider currentUserProvider;
     private final FinancialAccountActivity financialAccountActivity;
+    private final BalanceSnapshotRepository snapshotRepository;
 
     FinancialAccountService(FinancialAccountRepository repository, CurrentUserProvider currentUserProvider,
-                            FinancialAccountActivity financialAccountActivity) {
+                            FinancialAccountActivity financialAccountActivity,
+                            BalanceSnapshotRepository snapshotRepository) {
         this.repository = repository;
         this.currentUserProvider = currentUserProvider;
         this.financialAccountActivity = financialAccountActivity;
+        this.snapshotRepository = snapshotRepository;
     }
 
     @Transactional
@@ -35,7 +39,15 @@ class FinancialAccountService {
                 MoneyValues.amountOrZero(request.openingBalance())
         );
 
-        return FinancialAccountResponse.from(repository.saveAndFlush(account));
+        FinancialAccount savedAccount = repository.saveAndFlush(account);
+        snapshotRepository.saveAndFlush(new BalanceSnapshot(
+                UUID.randomUUID(),
+                savedAccount.getId(),
+                savedAccount.getOpeningBalance(),
+                openingEffectiveAt(savedAccount.getOpeningDate()),
+                BalanceSnapshotSource.OPENING
+        ));
+        return FinancialAccountResponse.from(savedAccount);
     }
 
     @Transactional(readOnly = true)
@@ -75,6 +87,25 @@ class FinancialAccountService {
                         ? account.getOpeningBalance()
                         : MoneyValues.amountOrZero(request.openingBalance())
         );
+        if (request.openingBalance() != null) {
+            account.recordCurrentBalance(account.getOpeningBalance());
+        }
+        if (request.openingDate() != null || request.openingBalance() != null) {
+            BalanceSnapshot openingSnapshot = snapshotRepository
+                    .findByAccountIdAndSource(accountId, BalanceSnapshotSource.OPENING)
+                    .orElseGet(() -> new BalanceSnapshot(
+                            UUID.randomUUID(),
+                            accountId,
+                            account.getOpeningBalance(),
+                            openingEffectiveAt(account.getOpeningDate()),
+                            BalanceSnapshotSource.OPENING
+                    ));
+            openingSnapshot.updateOpeningValues(
+                    account.getOpeningBalance(),
+                    openingEffectiveAt(account.getOpeningDate())
+            );
+            snapshotRepository.saveAndFlush(openingSnapshot);
+        }
         return FinancialAccountResponse.from(repository.saveAndFlush(account));
     }
 
@@ -95,5 +126,9 @@ class FinancialAccountService {
     private FinancialAccount findOwnedAccount(UUID accountId) {
         return repository.findByIdAndOwnerId(accountId, currentUserProvider.userId())
                 .orElseThrow(() -> new FinancialAccountNotFoundException(accountId));
+    }
+
+    private Instant openingEffectiveAt(java.time.LocalDate openingDate) {
+        return openingDate.atStartOfDay().toInstant(ZoneOffset.UTC);
     }
 }

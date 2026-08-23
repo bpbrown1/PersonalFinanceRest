@@ -34,6 +34,9 @@ class FinancialAccountServiceTest {
     @Mock
     private FinancialAccountActivity financialAccountActivity;
 
+    @Mock
+    private BalanceSnapshotRepository snapshotRepository;
+
     private FinancialAccountService service;
     private UUID ownerId;
     private UUID accountId;
@@ -41,7 +44,12 @@ class FinancialAccountServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new FinancialAccountService(repository, currentUserProvider, financialAccountActivity);
+        service = new FinancialAccountService(
+                repository,
+                currentUserProvider,
+                financialAccountActivity,
+                snapshotRepository
+        );
         ownerId = UUID.randomUUID();
         accountId = UUID.randomUUID();
         account = new FinancialAccount(
@@ -141,6 +149,7 @@ class FinancialAccountServiceTest {
         assertThat(response.currency()).isEqualTo("EUR");
         assertThat(response.openingDate()).isEqualTo(LocalDate.of(2026, 8, 1));
         assertThat(response.openingBalance()).isEqualByComparingTo("1500.50");
+        assertThat(response.currentBalance()).isEqualByComparingTo("1500.50");
     }
 
     @Test

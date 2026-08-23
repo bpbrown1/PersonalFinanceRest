@@ -40,6 +40,9 @@ public class FinancialAccount {
     @Column(name = "opening_balance", nullable = false, precision = 19, scale = 2)
     private BigDecimal openingBalance;
 
+    @Column(name = "current_balance", nullable = false, precision = 19, scale = 2)
+    private BigDecimal currentBalance;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -61,6 +64,7 @@ public class FinancialAccount {
         this.currency = currency;
         this.openingDate = openingDate;
         this.openingBalance = openingBalance;
+        this.currentBalance = openingBalance;
     }
 
     @PrePersist
@@ -103,6 +107,10 @@ public class FinancialAccount {
         return openingBalance;
     }
 
+    public BigDecimal getCurrentBalance() {
+        return currentBalance;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }
@@ -135,5 +143,9 @@ public class FinancialAccount {
 
     void restore() {
         archivedAt = null;
+    }
+
+    void recordCurrentBalance(BigDecimal currentBalance) {
+        this.currentBalance = currentBalance;
     }
 }

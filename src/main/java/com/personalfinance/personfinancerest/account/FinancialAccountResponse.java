@@ -28,7 +28,7 @@ public record FinancialAccountResponse(
                 account.getCurrency(),
                 account.getOpeningDate(),
                 account.getOpeningBalance(),
-                account.getOpeningBalance(),
+                account.getCurrentBalance(),
                 account.getStatus(),
                 account.getArchivedAt(),
                 account.getCreatedAt(),

@@ -1,5 +1,9 @@
 package com.personalfinance.personfinancerest.web;
 
+import com.personalfinance.personfinancerest.account.AccountBalanceNotFoundException;
+import com.personalfinance.personfinancerest.account.ArchivedFinancialAccountException;
+import com.personalfinance.personfinancerest.account.BalanceSnapshotConflictException;
+import com.personalfinance.personfinancerest.account.BalanceSnapshotNotFoundException;
 import com.personalfinance.personfinancerest.account.FinancialAccountNotFoundException;
 import com.personalfinance.personfinancerest.account.FinancialAccountInUseException;
 import com.personalfinance.personfinancerest.account.InvalidAccountStatusException;
@@ -9,6 +13,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -16,6 +21,28 @@ import java.util.Map;
 
 @RestControllerAdvice
 class ApiExceptionHandler {
+
+    @ExceptionHandler({BalanceSnapshotConflictException.class, ArchivedFinancialAccountException.class})
+    ResponseEntity<ApiError> handleBalanceConflict(RuntimeException exception) {
+        ApiError response = new ApiError(
+                Instant.now(),
+                HttpStatus.CONFLICT.value(),
+                exception.getMessage(),
+                Map.of()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler({AccountBalanceNotFoundException.class, BalanceSnapshotNotFoundException.class})
+    ResponseEntity<ApiError> handleBalanceNotFound(RuntimeException exception) {
+        ApiError response = new ApiError(
+                Instant.now(),
+                HttpStatus.NOT_FOUND.value(),
+                exception.getMessage(),
+                Map.of()
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+    }
 
     @ExceptionHandler(FinancialAccountInUseException.class)
     ResponseEntity<ApiError> handleFinancialAccountInUse(FinancialAccountInUseException exception) {
@@ -56,6 +83,13 @@ class ApiExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     ResponseEntity<ApiError> handleUnreadableMessage() {
         return badRequest("Request body is malformed", Map.of());
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    ResponseEntity<ApiError> handleTypeMismatch(MethodArgumentTypeMismatchException exception) {
+        return badRequest("Validation failed", Map.of(
+                exception.getName(), "has an invalid value"
+        ));
     }
 
     private ResponseEntity<ApiError> badRequest(String error, Map<String, String> fieldErrors) {

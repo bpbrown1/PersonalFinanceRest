@@ -66,6 +66,26 @@ A successful request returns `201 Created`, a `Location` header, and the created
 
 `currentBalance` initially equals `openingBalance`. The response field remains stable when transaction activity later becomes part of the calculation.
 
+### Preserve balance history
+
+Creating an account records an immutable opening snapshot at midnight UTC on its opening date. Record later observed balances with:
+
+`POST /api/v1/accounts/{accountId}/balance-snapshots`
+
+```json
+{
+  "balance": 1800.00,
+  "effectiveAt": "2026-08-21T12:00:00Z"
+}
+```
+
+- `GET /api/v1/accounts/{accountId}/balance-snapshots` returns the complete history in effective-time order.
+- `GET /api/v1/accounts/{accountId}/balance-snapshots/{snapshotId}` returns one snapshot.
+- `GET /api/v1/accounts/{accountId}/balance?asOf={instant}` returns the latest balance effective at or before the requested UTC instant.
+- Omitting `asOf` returns the latest currently effective balance.
+
+Snapshots are append-only. A backdated snapshot is retained without replacing a later current balance. Duplicate effective timestamps and snapshots for archived accounts return `409 Conflict`. A request before the first snapshot returns `404 Not Found`.
+
 ### Maintain an account
 
 `PATCH /api/v1/accounts/{accountId}` updates one or more supplied fields:
@@ -107,5 +127,7 @@ All documented API errors use this shape:
 - Malformed JSON or unsupported enum values return `400` with `error` set to `Request body is malformed`.
 - A valid but unknown account ID returns `404` with `error` set to `Financial account not found: {accountId}` and an empty `fieldErrors` object.
 - Attempts to change currency or opening terms after financial activity exists return `409` with an empty `fieldErrors` object.
+- Duplicate balance timestamps and attempts to record balances on archived accounts return `409`.
+- An as-of request before the first recorded balance returns `404`.
 
 Clients should use `status` and `fieldErrors` for behavior rather than parsing the human-readable `error` text.

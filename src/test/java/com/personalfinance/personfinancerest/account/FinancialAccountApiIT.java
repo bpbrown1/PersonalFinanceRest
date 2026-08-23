@@ -9,14 +9,12 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
@@ -45,11 +43,12 @@ class FinancialAccountApiIT {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    @MockitoBean
-    private FinancialAccountActivity financialAccountActivity;
+    @Autowired
+    private BalanceSnapshotRepository snapshotRepository;
 
     @BeforeEach
     void clearAccounts() {
+        snapshotRepository.deleteAll();
         repository.deleteAll();
     }
 
@@ -218,7 +217,15 @@ class FinancialAccountApiIT {
     @Test
     void preventsFinancialTermChangesAfterActivityIsRecorded() throws Exception {
         UUID accountId = createAccount("Everyday Checking", "checking");
-        given(financialAccountActivity.existsFor(accountId)).willReturn(true);
+        mockMvc.perform(post("/api/v1/accounts/{accountId}/balance-snapshots", accountId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "balance": 1800.00,
+                                  "effectiveAt": "2026-08-21T12:00:00Z"
+                                }
+                                """))
+                .andExpect(status().isCreated());
 
         mockMvc.perform(patch("/api/v1/accounts/{accountId}", accountId)
                         .contentType(MediaType.APPLICATION_JSON)
