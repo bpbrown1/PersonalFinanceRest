@@ -12,6 +12,18 @@ The API runs at `http://localhost:8080` by default. All public application endpo
 
 Run unit tests with `./mvnw test`. Run unit and integration tests with `./mvnw verify`.
 
+### Development sample data
+
+Activate the `dev` Spring profile to start the in-memory H2 database with representative sample data:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
+```
+
+The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, and active and recoverably deleted transactions. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
+
+Production migrations remain in `db/migration`; sample data must stay under `dev/db/migration`. When a feature adds required tables, relationships, or useful frontend states, update the development seed and `DevelopmentDataIT` together. The fixed seed UUIDs should remain stable unless a relationship is intentionally replaced.
+
 The REST API permits browser requests from `http://localhost:4200` by default for local Angular development. Override the exact, comma-separated origins without changing code:
 
 ```bash
@@ -164,6 +176,24 @@ Record income or spending with `POST /api/v1/transactions`:
 - `POST /api/v1/transactions/{transactionId}/restore` restores it idempotently and reapplies its balance impact.
 
 Transactions require an active owned account, cannot predate that account's opening date or be future-dated, and may reference an active owned category compatible with their type. A retained archived category remains available to its existing transaction, preserving history. Even deleted transactions count as account activity, so currency and opening terms remain protected.
+
+Retrieve active transaction totals grouped by account currency with:
+
+`GET /api/v1/transactions/summary?from=2026-08-01&to=2026-08-31`
+
+```json
+[
+  {
+    "currency": "USD",
+    "income": 2416.00,
+    "spending": 24.36,
+    "netImpact": 2391.64,
+    "transactionCount": 2
+  }
+]
+```
+
+`income` and `spending` are positive fixed-decimal totals, and `netImpact` is income minus spending. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Only active transactions owned by the current user are included. Results are ordered by currency, and a range with no activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error. US-008 will add the same account, category, and type filters to both summaries and paginated ledger retrieval.
 
 Balance snapshots and transaction-driven balance changes currently share the account's `currentBalance` projection. A newly effective snapshot sets the observed balance; subsequent transaction changes apply deltas. Full automatic reconciliation between the ledger and observed snapshots is intentionally deferred to the dedicated reconciliation story.
 

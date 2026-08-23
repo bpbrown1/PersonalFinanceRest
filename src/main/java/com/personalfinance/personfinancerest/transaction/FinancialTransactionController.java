@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -35,6 +36,14 @@ class FinancialTransactionController {
     @GetMapping
     List<TransactionResponse> findAll(@RequestParam(defaultValue = "active") String status) {
         return service.findAll(TransactionStatusFilter.fromValue(status));
+    }
+
+    @GetMapping("/summary")
+    List<TransactionSummaryResponse> summarize(
+            @RequestParam(required = false) LocalDate from,
+            @RequestParam(required = false) LocalDate to
+    ) {
+        return service.summarize(from, to);
     }
 
     @GetMapping("/{transactionId}")
