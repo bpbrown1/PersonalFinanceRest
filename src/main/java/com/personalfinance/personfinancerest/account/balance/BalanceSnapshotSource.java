@@ -1,0 +1,15 @@
+package com.personalfinance.personfinancerest.account.balance;
+
+import com.fasterxml.jackson.annotation.JsonValue;
+
+import java.util.Locale;
+
+public enum BalanceSnapshotSource {
+    OPENING,
+    MANUAL;
+
+    @JsonValue
+    public String toValue() {
+        return name().toLowerCase(Locale.ROOT);
+    }
+}

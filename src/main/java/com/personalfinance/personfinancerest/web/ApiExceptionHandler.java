@@ -1,12 +1,12 @@
 package com.personalfinance.personfinancerest.web;
 
-import com.personalfinance.personfinancerest.account.AccountBalanceNotFoundException;
-import com.personalfinance.personfinancerest.account.ArchivedFinancialAccountException;
-import com.personalfinance.personfinancerest.account.BalanceSnapshotConflictException;
-import com.personalfinance.personfinancerest.account.BalanceSnapshotNotFoundException;
-import com.personalfinance.personfinancerest.account.FinancialAccountNotFoundException;
-import com.personalfinance.personfinancerest.account.FinancialAccountInUseException;
-import com.personalfinance.personfinancerest.account.InvalidAccountStatusException;
+import com.personalfinance.personfinancerest.account.balance.AccountBalanceNotFoundException;
+import com.personalfinance.personfinancerest.account.balance.ArchivedFinancialAccountException;
+import com.personalfinance.personfinancerest.account.balance.BalanceSnapshotConflictException;
+import com.personalfinance.personfinancerest.account.balance.BalanceSnapshotNotFoundException;
+import com.personalfinance.personfinancerest.account.management.FinancialAccountInUseException;
+import com.personalfinance.personfinancerest.account.management.FinancialAccountNotFoundException;
+import com.personalfinance.personfinancerest.account.management.InvalidAccountStatusException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;

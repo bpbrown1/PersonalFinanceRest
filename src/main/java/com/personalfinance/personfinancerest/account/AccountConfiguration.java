@@ -1,5 +1,7 @@
 package com.personalfinance.personfinancerest.account;
 
+import com.personalfinance.personfinancerest.account.activity.FinancialAccountActivity;
+import com.personalfinance.personfinancerest.account.activity.FinancialAccountActivitySource;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
