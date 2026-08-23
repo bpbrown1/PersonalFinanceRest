@@ -1,4 +1,4 @@
-package com.personalfinance.personfinancerest.account;
+package com.personalfinance.personfinancerest.account.management;
 
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;

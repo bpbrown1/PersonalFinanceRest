@@ -1,4 +1,4 @@
-package com.personalfinance.personfinancerest.account;
+package com.personalfinance.personfinancerest.account.management;
 
 import java.util.UUID;
 

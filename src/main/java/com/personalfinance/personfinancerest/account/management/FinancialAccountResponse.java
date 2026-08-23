@@ -1,4 +1,4 @@
-package com.personalfinance.personfinancerest.account;
+package com.personalfinance.personfinancerest.account.management;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -13,6 +13,9 @@ public record FinancialAccountResponse(
         String currency,
         LocalDate openingDate,
         BigDecimal openingBalance,
+        BigDecimal currentBalance,
+        AccountStatus status,
+        Instant archivedAt,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -25,6 +28,9 @@ public record FinancialAccountResponse(
                 account.getCurrency(),
                 account.getOpeningDate(),
                 account.getOpeningBalance(),
+                account.getCurrentBalance(),
+                account.getStatus(),
+                account.getArchivedAt(),
                 account.getCreatedAt(),
                 account.getUpdatedAt()
         );

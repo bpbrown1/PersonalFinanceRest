@@ -1,4 +1,4 @@
-package com.personalfinance.personfinancerest.account;
+package com.personalfinance.personfinancerest.account.management;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -12,6 +12,7 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 @Entity
@@ -40,17 +41,23 @@ public class FinancialAccount {
     @Column(name = "opening_balance", nullable = false, precision = 19, scale = 2)
     private BigDecimal openingBalance;
 
+    @Column(name = "current_balance", nullable = false, precision = 19, scale = 2)
+    private BigDecimal currentBalance;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "archived_at")
+    private Instant archivedAt;
+
     protected FinancialAccount() {
     }
 
-    FinancialAccount(UUID id, UUID ownerId, String name, AccountType type, String currency,
-                     LocalDate openingDate, BigDecimal openingBalance) {
+    public FinancialAccount(UUID id, UUID ownerId, String name, AccountType type, String currency,
+                            LocalDate openingDate, BigDecimal openingBalance) {
         this.id = id;
         this.ownerId = ownerId;
         this.name = name;
@@ -58,6 +65,7 @@ public class FinancialAccount {
         this.currency = currency;
         this.openingDate = openingDate;
         this.openingBalance = openingBalance;
+        this.currentBalance = openingBalance;
     }
 
     @PrePersist
@@ -100,11 +108,45 @@ public class FinancialAccount {
         return openingBalance;
     }
 
+    public BigDecimal getCurrentBalance() {
+        return currentBalance;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public Instant getArchivedAt() {
+        return archivedAt;
+    }
+
+    public AccountStatus getStatus() {
+        return archivedAt == null ? AccountStatus.ACTIVE : AccountStatus.ARCHIVED;
+    }
+
+    void update(String name, AccountType type, String currency, LocalDate openingDate, BigDecimal openingBalance) {
+        this.name = name;
+        this.type = type;
+        this.currency = currency;
+        this.openingDate = openingDate;
+        this.openingBalance = openingBalance;
+    }
+
+    void archive(Instant archivedAt) {
+        if (this.archivedAt == null) {
+            this.archivedAt = archivedAt.truncatedTo(ChronoUnit.MICROS);
+        }
+    }
+
+    void restore() {
+        archivedAt = null;
+    }
+
+    public void recordCurrentBalance(BigDecimal currentBalance) {
+        this.currentBalance = currentBalance;
     }
 }
