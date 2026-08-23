@@ -82,6 +82,19 @@ class FinancialTransactionService {
         return TransactionResponse.from(findOwnedTransaction(transactionId));
     }
 
+    @Transactional(readOnly = true)
+    List<TransactionSummaryResponse> summarize(LocalDate from, LocalDate to) {
+        if (from != null && to != null && from.isAfter(to)) {
+            throw new InvalidTransactionDateRangeException();
+        }
+        return repository.summarize(
+                        currentUserProvider.userId(), from, to,
+                        TransactionType.INCOME, TransactionType.EXPENSE
+                ).stream()
+                .map(TransactionSummaryResponse::from)
+                .toList();
+    }
+
     @Transactional
     TransactionResponse update(UUID transactionId, UpdateTransactionRequest request) {
         UUID ownerId = currentUserProvider.userId();
