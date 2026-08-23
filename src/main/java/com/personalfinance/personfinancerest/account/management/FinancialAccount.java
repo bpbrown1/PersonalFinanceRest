@@ -12,6 +12,7 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 @Entity
@@ -137,7 +138,7 @@ public class FinancialAccount {
 
     void archive(Instant archivedAt) {
         if (this.archivedAt == null) {
-            this.archivedAt = archivedAt;
+            this.archivedAt = archivedAt.truncatedTo(ChronoUnit.MICROS);
         }
     }
 

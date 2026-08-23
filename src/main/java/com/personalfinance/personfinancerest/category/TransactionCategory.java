@@ -10,6 +10,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 @Entity
@@ -81,7 +82,7 @@ public class TransactionCategory {
 
     void archive(Instant archivedAt) {
         if (this.archivedAt == null) {
-            this.archivedAt = archivedAt;
+            this.archivedAt = archivedAt.truncatedTo(ChronoUnit.MICROS);
             activeNameKey = null;
         }
     }
