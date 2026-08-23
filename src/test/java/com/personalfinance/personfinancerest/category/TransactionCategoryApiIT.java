@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,9 +42,13 @@ class TransactionCategoryApiIT {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private CategoryHierarchy categoryHierarchy;
+
     @BeforeEach
     void clearCategories() {
-        repository.deleteAll();
+        jdbcTemplate.update("UPDATE transaction_category SET parent_id = NULL");
+        jdbcTemplate.update("DELETE FROM transaction_category");
         jdbcTemplate.update("DELETE FROM app_user WHERE id <> ?", currentUserProvider.userId());
     }
 
@@ -201,15 +206,119 @@ class TransactionCategoryApiIT {
         assertThat(repository.findById(categoryId)).isPresent();
     }
 
+    @Test
+    void createsAssignsAndClearsAParent() throws Exception {
+        UUID foodId = createCategory("Food", "expense");
+        UUID diningId = createCategory("Dining", "expense", foodId);
+
+        mockMvc.perform(get("/api/v1/categories/{categoryId}", diningId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.parentId").value(foodId.toString()));
+
+        UUID lifestyleId = createCategory("Lifestyle", "both");
+        mockMvc.perform(patch("/api/v1/categories/{categoryId}/parent", diningId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"parentId\":\"" + lifestyleId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.parentId").value(lifestyleId.toString()));
+
+        mockMvc.perform(patch("/api/v1/categories/{categoryId}/parent", diningId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"parentId\":null}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.parentId").isEmpty());
+    }
+
+    @Test
+    void rejectsDirectAndIndirectCircularRelationships() throws Exception {
+        UUID foodId = createCategory("Food", "expense");
+        UUID diningId = createCategory("Dining", "expense", foodId);
+        UUID restaurantId = createCategory("Restaurants", "expense", diningId);
+
+        mockMvc.perform(patch("/api/v1/categories/{categoryId}/parent", foodId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"parentId\":\"" + foodId + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409));
+
+        mockMvc.perform(patch("/api/v1/categories/{categoryId}/parent", foodId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"parentId\":\"" + restaurantId + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("circular")));
+    }
+
+    @Test
+    void rejectsAnUnknownOrUnownedParent() throws Exception {
+        UUID categoryId = createCategory("Dining", "expense");
+        UUID unknownId = UUID.randomUUID();
+
+        mockMvc.perform(patch("/api/v1/categories/{categoryId}/parent", categoryId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"parentId\":\"" + unknownId + "\"}"))
+                .andExpect(status().isNotFound());
+
+        UUID otherOwnerId = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO app_user (id, display_name) VALUES (?, ?)", otherOwnerId, "Other User");
+        TransactionCategory privateParent = repository.saveAndFlush(new TransactionCategory(
+                UUID.randomUUID(), otherOwnerId, "Private Parent", CategoryApplicability.EXPENSE
+        ));
+        mockMvc.perform(patch("/api/v1/categories/{categoryId}/parent", categoryId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"parentId\":\"" + privateParent.getId() + "\"}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void preservesAnActiveParentChainAcrossLifecycleChanges() throws Exception {
+        UUID parentId = createCategory("Food", "expense");
+        UUID childId = createCategory("Dining", "expense", parentId);
+
+        mockMvc.perform(post("/api/v1/categories/{categoryId}/archive", parentId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("active children")));
+
+        mockMvc.perform(post("/api/v1/categories/{categoryId}/archive", childId))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/categories/{categoryId}/archive", parentId))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/categories/{categoryId}/restore", childId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("parent is archived")));
+        mockMvc.perform(post("/api/v1/categories/{categoryId}/restore", parentId))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/categories/{categoryId}/restore", childId))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void expandsActiveAndArchivedDescendantsForFutureReports() throws Exception {
+        UUID rootId = createCategory("Food", "expense");
+        UUID childId = createCategory("Dining", "expense", rootId);
+        UUID grandchildId = createCategory("Restaurants", "expense", childId);
+        UUID unrelatedId = createCategory("Salary", "income");
+        mockMvc.perform(post("/api/v1/categories/{categoryId}/archive", grandchildId))
+                .andExpect(status().isOk());
+
+        Set<UUID> result = categoryHierarchy.categoryAndDescendantIds(currentUserProvider.userId(), rootId);
+
+        assertThat(result).containsExactlyInAnyOrder(rootId, childId, grandchildId)
+                .doesNotContain(unrelatedId);
+    }
+
     private UUID createCategory(String name, String applicability) throws Exception {
+        return createCategory(name, applicability, null);
+    }
+
+    private UUID createCategory(String name, String applicability, UUID parentId) throws Exception {
         String response = mockMvc.perform(post("/api/v1/categories")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new CreatePayload(name, applicability))))
+                        .content(objectMapper.writeValueAsString(new CreatePayload(name, applicability, parentId))))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return UUID.fromString(objectMapper.readTree(response).get("id").asText());
     }
 
-    private record CreatePayload(String name, String applicability) {
+    private record CreatePayload(String name, String applicability, UUID parentId) {
     }
 }

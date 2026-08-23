@@ -38,6 +38,9 @@ public class TransactionCategory {
     @Column(name = "archived_at")
     private Instant archivedAt;
 
+    @Column(name = "parent_id")
+    private UUID parentId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -48,9 +51,14 @@ public class TransactionCategory {
     }
 
     TransactionCategory(UUID id, UUID ownerId, String name, CategoryApplicability applicability) {
+        this(id, ownerId, name, applicability, null);
+    }
+
+    TransactionCategory(UUID id, UUID ownerId, String name, CategoryApplicability applicability, UUID parentId) {
         this.id = id;
         this.ownerId = ownerId;
         this.applicability = applicability;
+        this.parentId = parentId;
         rename(name);
     }
 
@@ -83,6 +91,10 @@ public class TransactionCategory {
         activeNameKey = normalizedName;
     }
 
+    void assignParent(UUID parentId) {
+        this.parentId = parentId;
+    }
+
     private void rename(String name) {
         this.name = CategoryNames.displayName(name);
         normalizedName = CategoryNames.normalizedName(name);
@@ -113,6 +125,10 @@ public class TransactionCategory {
 
     public Instant getArchivedAt() {
         return archivedAt;
+    }
+
+    public UUID getParentId() {
+        return parentId;
     }
 
     public Instant getCreatedAt() {

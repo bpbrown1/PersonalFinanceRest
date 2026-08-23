@@ -46,6 +46,12 @@ class TransactionCategoryController {
         return service.update(categoryId, request);
     }
 
+    @PatchMapping("/{categoryId}/parent")
+    CategoryResponse updateParent(@PathVariable UUID categoryId,
+                                  @RequestBody UpdateCategoryParentRequest request) {
+        return service.updateParent(categoryId, request);
+    }
+
     @PostMapping("/{categoryId}/archive")
     CategoryResponse archive(@PathVariable UUID categoryId) {
         return service.archive(categoryId);

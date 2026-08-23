@@ -115,7 +115,8 @@ Create a transaction category with `POST /api/v1/categories`:
 ```json
 {
   "name": "Groceries",
-  "applicability": "expense"
+  "applicability": "expense",
+  "parentId": null
 }
 ```
 
@@ -126,10 +127,13 @@ Supported applicability values are `income`, `expense`, and `both`. A successful
 - `GET /api/v1/categories?status=all` returns both lifecycle states.
 - `GET /api/v1/categories/{categoryId}` retrieves one owned category.
 - `PATCH /api/v1/categories/{categoryId}` changes its name, applicability, or both.
+- `PATCH /api/v1/categories/{categoryId}/parent` assigns a parent or clears it with a null `parentId`.
 - `POST /api/v1/categories/{categoryId}/archive` archives it idempotently.
 - `POST /api/v1/categories/{categoryId}/restore` restores it idempotently.
 
 Active category names are unique per owner after trimming, collapsing repeated whitespace, and ignoring case. An archived category releases its active name, but restoring it returns `409 Conflict` if another active category now uses that name. There is intentionally no permanent-delete endpoint, so transaction history can continue to reference archived categories safely.
+
+Categories may form an owner-scoped hierarchy. Every category response includes nullable `parentId`, and create requests may supply one. Self-parenting and indirect cycles return `409 Conflict`. Active categories can only use active parents; archiving a parent with active children or restoring a child beneath an archived parent also returns `409`. Archived relationships remain stored so future reports can aggregate historical activity under a parent consistently.
 
 ## Error contract
 

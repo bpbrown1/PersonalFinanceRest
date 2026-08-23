@@ -8,6 +8,7 @@ import com.personalfinance.personfinancerest.account.management.FinancialAccount
 import com.personalfinance.personfinancerest.account.management.FinancialAccountNotFoundException;
 import com.personalfinance.personfinancerest.account.management.InvalidAccountStatusException;
 import com.personalfinance.personfinancerest.category.CategoryNotFoundException;
+import com.personalfinance.personfinancerest.category.CategoryHierarchyConflictException;
 import com.personalfinance.personfinancerest.category.DuplicateCategoryNameException;
 import com.personalfinance.personfinancerest.category.InvalidCategoryStatusException;
 import org.springframework.http.HttpStatus;
@@ -60,6 +61,17 @@ class ApiExceptionHandler {
 
     @ExceptionHandler(DuplicateCategoryNameException.class)
     ResponseEntity<ApiError> handleDuplicateCategoryName(DuplicateCategoryNameException exception) {
+        ApiError response = new ApiError(
+                Instant.now(),
+                HttpStatus.CONFLICT.value(),
+                exception.getMessage(),
+                Map.of()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler(CategoryHierarchyConflictException.class)
+    ResponseEntity<ApiError> handleCategoryHierarchyConflict(CategoryHierarchyConflictException exception) {
         ApiError response = new ApiError(
                 Instant.now(),
                 HttpStatus.CONFLICT.value(),
