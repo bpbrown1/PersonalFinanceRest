@@ -19,4 +19,6 @@ public interface TransactionCategoryRepository extends JpaRepository<Transaction
     boolean existsByOwnerIdAndActiveNameKey(UUID ownerId, String activeNameKey);
 
     boolean existsByOwnerIdAndActiveNameKeyAndIdNot(UUID ownerId, String activeNameKey, UUID id);
+
+    boolean existsByOwnerIdAndParentIdAndArchivedAtIsNull(UUID ownerId, UUID parentId);
 }

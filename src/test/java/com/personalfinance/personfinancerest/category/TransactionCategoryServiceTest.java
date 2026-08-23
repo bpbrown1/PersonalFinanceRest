@@ -10,6 +10,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -157,6 +158,128 @@ class TransactionCategoryServiceTest {
         assertThatThrownBy(() -> service.findById(categoryId))
                 .isInstanceOf(CategoryNotFoundException.class)
                 .hasMessageContaining(categoryId.toString());
+    }
+
+    @Test
+    void createsACategoryUnderAnOwnedActiveParent() {
+        UUID parentId = UUID.randomUUID();
+        TransactionCategory parent = new TransactionCategory(
+                parentId, ownerId, "Food", CategoryApplicability.EXPENSE
+        );
+        given(currentUserProvider.userId()).willReturn(ownerId);
+        given(repository.findByIdAndOwnerId(parentId, ownerId)).willReturn(Optional.of(parent));
+        given(repository.saveAndFlush(any(TransactionCategory.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+
+        CategoryResponse response = service.create(new CreateCategoryRequest(
+                "Dining", CategoryApplicability.EXPENSE, parentId
+        ));
+
+        assertThat(response.parentId()).isEqualTo(parentId);
+    }
+
+    @Test
+    void assignsAndClearsAParent() {
+        UUID parentId = UUID.randomUUID();
+        TransactionCategory parent = new TransactionCategory(
+                parentId, ownerId, "Food", CategoryApplicability.EXPENSE
+        );
+        givenOwnedCategory();
+        given(repository.findByIdAndOwnerId(parentId, ownerId)).willReturn(Optional.of(parent));
+        given(repository.saveAndFlush(category)).willReturn(category);
+
+        assertThat(service.updateParent(categoryId, new UpdateCategoryParentRequest(parentId)).parentId())
+                .isEqualTo(parentId);
+        assertThat(service.updateParent(categoryId, new UpdateCategoryParentRequest(null)).parentId()).isNull();
+    }
+
+    @Test
+    void rejectsSelfParentingAndIndirectCycles() {
+        givenOwnedCategory();
+        assertThatThrownBy(() -> service.updateParent(
+                categoryId, new UpdateCategoryParentRequest(categoryId)
+        )).isInstanceOf(CategoryHierarchyConflictException.class);
+
+        UUID childId = UUID.randomUUID();
+        TransactionCategory child = new TransactionCategory(
+                childId, ownerId, "Dining", CategoryApplicability.EXPENSE, categoryId
+        );
+        given(repository.findByIdAndOwnerId(childId, ownerId)).willReturn(Optional.of(child));
+
+        assertThatThrownBy(() -> service.updateParent(
+                categoryId, new UpdateCategoryParentRequest(childId)
+        )).isInstanceOf(CategoryHierarchyConflictException.class)
+                .hasMessageContaining("circular");
+    }
+
+    @Test
+    void rejectsAnArchivedParent() {
+        UUID parentId = UUID.randomUUID();
+        TransactionCategory parent = new TransactionCategory(
+                parentId, ownerId, "Food", CategoryApplicability.EXPENSE
+        );
+        parent.archive(java.time.Instant.now());
+        givenOwnedCategory();
+        given(repository.findByIdAndOwnerId(parentId, ownerId)).willReturn(Optional.of(parent));
+
+        assertThatThrownBy(() -> service.updateParent(
+                categoryId, new UpdateCategoryParentRequest(parentId)
+        )).isInstanceOf(CategoryHierarchyConflictException.class)
+                .hasMessageContaining("archived");
+    }
+
+    @Test
+    void protectsTheActiveHierarchyDuringArchiveAndRestore() {
+        givenOwnedCategory();
+        given(repository.existsByOwnerIdAndParentIdAndArchivedAtIsNull(ownerId, categoryId)).willReturn(true);
+
+        assertThatThrownBy(() -> service.archive(categoryId))
+                .isInstanceOf(CategoryHierarchyConflictException.class)
+                .hasMessageContaining("active children");
+
+        UUID parentId = UUID.randomUUID();
+        TransactionCategory parent = new TransactionCategory(
+                parentId, ownerId, "Food", CategoryApplicability.EXPENSE
+        );
+        parent.archive(java.time.Instant.now());
+        category.assignParent(parentId);
+        category.archive(java.time.Instant.now());
+        given(repository.findByIdAndOwnerId(parentId, ownerId)).willReturn(Optional.of(parent));
+
+        assertThatThrownBy(() -> service.restore(categoryId))
+                .isInstanceOf(CategoryHierarchyConflictException.class)
+                .hasMessageContaining("parent is archived");
+    }
+
+    @Test
+    void expandsTheRootAndAllDescendantsForReporting() {
+        UUID childId = UUID.randomUUID();
+        UUID grandchildId = UUID.randomUUID();
+        UUID unrelatedId = UUID.randomUUID();
+        TransactionCategory child = new TransactionCategory(
+                childId, ownerId, "Dining", CategoryApplicability.EXPENSE, categoryId
+        );
+        TransactionCategory grandchild = new TransactionCategory(
+                grandchildId, ownerId, "Restaurants", CategoryApplicability.EXPENSE, childId
+        );
+        TransactionCategory unrelated = new TransactionCategory(
+                unrelatedId, ownerId, "Salary", CategoryApplicability.INCOME
+        );
+        given(repository.findAllByOwnerIdOrderByNormalizedNameAsc(ownerId))
+                .willReturn(List.of(category, child, grandchild, unrelated));
+
+        Set<UUID> ids = service.categoryAndDescendantIds(ownerId, categoryId);
+
+        assertThat(ids).containsExactlyInAnyOrder(categoryId, childId, grandchildId);
+    }
+
+    @Test
+    void rejectsSubtreeExpansionForAnUnknownOwnerScopedRoot() {
+        given(repository.findAllByOwnerIdOrderByNormalizedNameAsc(ownerId)).willReturn(List.of(category));
+        UUID unknownId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> service.categoryAndDescendantIds(ownerId, unknownId))
+                .isInstanceOf(CategoryNotFoundException.class);
     }
 
     private void givenOwnedCategory() {

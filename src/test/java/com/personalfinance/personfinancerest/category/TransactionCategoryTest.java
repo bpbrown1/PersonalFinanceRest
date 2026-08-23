@@ -34,4 +34,18 @@ class TransactionCategoryTest {
         assertThat(category.getStatus()).isEqualTo(CategoryStatus.ACTIVE);
         assertThat(category.getArchivedAt()).isNull();
     }
+
+    @Test
+    void assignsAndClearsAParent() {
+        TransactionCategory category = new TransactionCategory(
+                UUID.randomUUID(), UUID.randomUUID(), "Dining", CategoryApplicability.EXPENSE
+        );
+        UUID parentId = UUID.randomUUID();
+
+        category.assignParent(parentId);
+        assertThat(category.getParentId()).isEqualTo(parentId);
+
+        category.assignParent(null);
+        assertThat(category.getParentId()).isNull();
+    }
 }
