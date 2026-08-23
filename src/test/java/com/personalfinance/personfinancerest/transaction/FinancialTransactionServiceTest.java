@@ -207,6 +207,39 @@ class FinancialTransactionServiceTest {
         assertThat(service.findAll(TransactionStatusFilter.ALL)).hasSize(1);
     }
 
+    @Test
+    void summarizesActiveTransactionsByCurrencyWithFixedDecimalTotals() {
+        TransactionSummaryAggregate aggregate = mock(TransactionSummaryAggregate.class);
+        given(aggregate.getCurrency()).willReturn("USD");
+        given(aggregate.getIncome()).willReturn(new BigDecimal("2416.00"));
+        given(aggregate.getSpending()).willReturn(new BigDecimal("24.36"));
+        given(aggregate.getTransactionCount()).willReturn(2L);
+        given(currentUserProvider.userId()).willReturn(ownerId);
+        given(repository.summarize(
+                ownerId, transactionDate.minusDays(1), transactionDate,
+                TransactionType.INCOME, TransactionType.EXPENSE
+        )).willReturn(List.of(aggregate));
+
+        TransactionSummaryResponse response = service.summarize(
+                transactionDate.minusDays(1), transactionDate
+        ).getFirst();
+
+        assertThat(response.currency()).isEqualTo("USD");
+        assertThat(response.income()).isEqualByComparingTo("2416.00");
+        assertThat(response.spending()).isEqualByComparingTo("24.36");
+        assertThat(response.netImpact()).isEqualByComparingTo("2391.64");
+        assertThat(response.transactionCount()).isEqualTo(2L);
+    }
+
+    @Test
+    void rejectsAnInvertedSummaryDateRangeBeforeQueryingTheRepository() {
+        assertThatThrownBy(() -> service.summarize(transactionDate, transactionDate.minusDays(1)))
+                .isInstanceOf(InvalidTransactionDateRangeException.class)
+                .hasMessage("from must be on or before to");
+
+        verify(repository, never()).summarize(any(), any(), any(), any(), any());
+    }
+
     private void givenOwnerAndLockedAccount(FinancialAccount lockedAccount) {
         given(currentUserProvider.userId()).willReturn(ownerId);
         given(accountRepository.findByIdAndOwnerIdForUpdate(accountId, ownerId))

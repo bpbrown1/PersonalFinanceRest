@@ -120,6 +120,93 @@ class FinancialTransactionApiIT {
     }
 
     @Test
+    void summarizesActiveOwnedTransactionsByAccountCurrency() throws Exception {
+        UUID usdAccountId = createAccount("Checking", "USD", "100.00");
+        UUID eurAccountId = createAccount("Travel", "EUR", "100.00");
+        createTransaction(new Payload(usdAccountId, "2416.00", TODAY.minusDays(2), "Pay", "income",
+                null, null, null, null));
+        createTransaction(new Payload(usdAccountId, "24.36", TODAY.minusDays(1), "Lunch", "expense",
+                null, null, null, null));
+        createTransaction(new Payload(eurAccountId, "10.00", TODAY.minusDays(1), "Train", "expense",
+                null, null, null, null));
+        UUID deletedId = createTransaction(new Payload(
+                usdAccountId, "999.00", TODAY.minusDays(1), "Deleted", "income",
+                null, null, null, null
+        ));
+        mockMvc.perform(delete("/api/v1/transactions/{transactionId}", deletedId))
+                .andExpect(status().isOk());
+
+        UUID otherOwnerId = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO app_user (id, display_name) VALUES (?, ?)", otherOwnerId, "Other User");
+        FinancialAccount otherAccount = createAccount(otherOwnerId, "Private", "500.00");
+        transactionRepository.saveAndFlush(new FinancialTransaction(
+                UUID.randomUUID(), otherOwnerId, otherAccount.getId(), null, new BigDecimal("500.00"),
+                TransactionType.INCOME, TODAY, "Private", null, null, null
+        ));
+
+        mockMvc.perform(get("/api/v1/transactions/summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].currency").value("EUR"))
+                .andExpect(jsonPath("$[0].income").value(0.0))
+                .andExpect(jsonPath("$[0].spending").value(10.0))
+                .andExpect(jsonPath("$[0].netImpact").value(-10.0))
+                .andExpect(jsonPath("$[0].transactionCount").value(1))
+                .andExpect(jsonPath("$[1].currency").value("USD"))
+                .andExpect(jsonPath("$[1].income").value(2416.0))
+                .andExpect(jsonPath("$[1].spending").value(24.36))
+                .andExpect(jsonPath("$[1].netImpact").value(2391.64))
+                .andExpect(jsonPath("$[1].transactionCount").value(2));
+    }
+
+    @Test
+    void appliesInclusiveOpenEndedSummaryDatesAndValidatesTheRange() throws Exception {
+        UUID accountId = createAccount("Checking", "100.00");
+        createTransaction(new Payload(accountId, "20.00", TODAY.minusDays(2), "Older", "income",
+                null, null, null, null));
+        createTransaction(new Payload(accountId, "5.00", TODAY.minusDays(1), "Newer", "expense",
+                null, null, null, null));
+
+        mockMvc.perform(get("/api/v1/transactions/summary")
+                        .queryParam("from", TODAY.minusDays(1).toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].income").value(0.0))
+                .andExpect(jsonPath("$[0].spending").value(5.0))
+                .andExpect(jsonPath("$[0].transactionCount").value(1));
+
+        mockMvc.perform(get("/api/v1/transactions/summary")
+                        .queryParam("to", TODAY.minusDays(2).toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].income").value(20.0))
+                .andExpect(jsonPath("$[0].spending").value(0.0))
+                .andExpect(jsonPath("$[0].transactionCount").value(1));
+
+        mockMvc.perform(get("/api/v1/transactions/summary")
+                        .queryParam("from", TODAY.minusDays(1).toString())
+                        .queryParam("to", TODAY.minusDays(1).toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].transactionCount").value(1));
+
+        mockMvc.perform(get("/api/v1/transactions/summary")
+                        .queryParam("from", TODAY.toString())
+                        .queryParam("to", TODAY.minusDays(1).toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Validation failed"))
+                .andExpect(jsonPath("$.fieldErrors.dateRange").value("from must be on or before to"));
+
+        mockMvc.perform(get("/api/v1/transactions/summary")
+                        .queryParam("from", "not-a-date"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.from").exists());
+
+        mockMvc.perform(get("/api/v1/transactions/summary")
+                        .queryParam("from", TODAY.minusDays(10).toString())
+                        .queryParam("to", TODAY.minusDays(9).toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
     void validatesRequiredFieldsMagnitudeAndTransactionType() throws Exception {
         mockMvc.perform(post("/api/v1/transactions")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -319,12 +406,20 @@ class FinancialTransactionApiIT {
     }
 
     private UUID createAccount(String name, String openingBalance) {
-        return createAccount(currentUserProvider.userId(), name, openingBalance).getId();
+        return createAccount(name, "USD", openingBalance);
+    }
+
+    private UUID createAccount(String name, String currency, String openingBalance) {
+        return createAccount(currentUserProvider.userId(), name, currency, openingBalance).getId();
     }
 
     private FinancialAccount createAccount(UUID ownerId, String name, String openingBalance) {
+        return createAccount(ownerId, name, "USD", openingBalance);
+    }
+
+    private FinancialAccount createAccount(UUID ownerId, String name, String currency, String openingBalance) {
         return accountRepository.saveAndFlush(new FinancialAccount(
-                UUID.randomUUID(), ownerId, name, AccountType.CHECKING, "USD",
+                UUID.randomUUID(), ownerId, name, AccountType.CHECKING, currency,
                 TODAY.minusDays(30), new BigDecimal(openingBalance)
         ));
     }
