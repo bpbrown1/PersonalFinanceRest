@@ -108,6 +108,29 @@ There is intentionally no permanent-delete endpoint. Archiving preserves the acc
 
 The initial application uses a seeded default user. The ownership boundary remains in the API and persistence model so authentication can replace that user later.
 
+## Category contract
+
+Create a transaction category with `POST /api/v1/categories`:
+
+```json
+{
+  "name": "Groceries",
+  "applicability": "expense"
+}
+```
+
+Supported applicability values are `income`, `expense`, and `both`. A successful request returns `201 Created`, a `Location` header, and the category with its owner, lifecycle status, and timestamps.
+
+- `GET /api/v1/categories` returns active categories alphabetically.
+- `GET /api/v1/categories?status=archived` returns archived categories.
+- `GET /api/v1/categories?status=all` returns both lifecycle states.
+- `GET /api/v1/categories/{categoryId}` retrieves one owned category.
+- `PATCH /api/v1/categories/{categoryId}` changes its name, applicability, or both.
+- `POST /api/v1/categories/{categoryId}/archive` archives it idempotently.
+- `POST /api/v1/categories/{categoryId}/restore` restores it idempotently.
+
+Active category names are unique per owner after trimming, collapsing repeated whitespace, and ignoring case. An archived category releases its active name, but restoring it returns `409 Conflict` if another active category now uses that name. There is intentionally no permanent-delete endpoint, so transaction history can continue to reference archived categories safely.
+
 ## Error contract
 
 All documented API errors use this shape:
@@ -127,6 +150,7 @@ All documented API errors use this shape:
 - Malformed JSON or unsupported enum values return `400` with `error` set to `Request body is malformed`.
 - A valid but unknown account ID returns `404` with `error` set to `Financial account not found: {accountId}` and an empty `fieldErrors` object.
 - Attempts to change currency or opening terms after financial activity exists return `409` with an empty `fieldErrors` object.
+- Duplicate active category names, including restore collisions, return `409`.
 - Duplicate balance timestamps and attempts to record balances on archived accounts return `409`.
 - An as-of request before the first recorded balance returns `404`.
 
