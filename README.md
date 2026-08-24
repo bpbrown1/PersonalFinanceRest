@@ -20,7 +20,7 @@ Activate the `dev` Spring profile to start the in-memory H2 database with repres
 SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 ```
 
-The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, and same-currency and cross-currency transfers. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
+The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, and same-currency and cross-currency transfers. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
 
 Production migrations remain in `db/migration`; sample data must stay under `dev/db/migration`. When a feature adds required tables, relationships, or useful frontend states, update the development seed and `DevelopmentDataIT` together. The fixed seed UUIDs should remain stable unless a relationship is intentionally replaced.
 
@@ -177,6 +177,29 @@ Record income or spending with `POST /api/v1/transactions`:
 
 Transactions require an active owned account, cannot predate that account's opening date or be future-dated, and may reference an active owned category compatible with their type. A retained archived category remains available to its existing transaction, preserving history. Even deleted transactions count as account activity, so currency and opening terms remain protected.
 
+An income or expense can use either the optional parent `categoryId` above or an ordered `splits` allocation, never both:
+
+```json
+{
+  "accountId": "0dfae49e-6765-4f9f-b485-53d17338a106",
+  "amount": 100.00,
+  "transactionDate": "2026-08-23",
+  "description": "Household purchase",
+  "type": "expense",
+  "categoryId": null,
+  "splits": [
+    { "categoryId": "50ea8ada-6436-4624-bbb9-a33c9a3631e2", "amount": 75.25 },
+    { "categoryId": "e9d0ccb5-6362-4bf7-9d8f-fcc9e1bf2f4a", "amount": 24.75 }
+  ]
+}
+```
+
+A split requires at least two positive rows with distinct owned, type-compatible categories. All monetary values currently use the application's fixed two-decimal currency scale, and split amounts must equal the normalized transaction amount exactly; the server never creates a remainder row. Transfers cannot be split.
+
+Create requests omit split IDs. Responses expose each row's stable `id`, zero-based `position`, `categoryId`, and `amount`. Full `PUT` requests retain IDs for unchanged rows, omit IDs for new rows, and delete rows omitted from the replacement allocation. Existing IDs cannot be moved between transactions. New or reassigned rows require active categories; an unchanged row may retain an archived category. Supplying no splits returns the transaction to the single-category contract. Soft deletion and restoration retain the allocation.
+
+Allocation validation uses indexed field keys such as `splits[0].id`, `splits[0].categoryId`, and `splits[0].amount`; row-count, duplicate-category, and total-mismatch failures use `splits`.
+
 Transaction search supports these combinable query parameters:
 
 - `accountId`, inclusive `from` and `to` dates, `categoryId`, and `type`.
@@ -242,7 +265,7 @@ Retrieve active transaction totals grouped by account currency with:
 ]
 ```
 
-`income` and `spending` are positive fixed-decimal totals, and `netImpact` is income minus spending. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Optional `accountId`, `categoryId`, and `type` filters match the paged ledger semantics. Only active income and expense transactions owned by the current user are included; transfer legs are excluded from every total and from `transactionCount`. Results are ordered by currency, and a range with no qualifying activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error.
+`income` and `spending` are positive fixed-decimal totals, and `netImpact` is income minus spending. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Optional `accountId`, `categoryId`, and `type` filters match the paged ledger semantics. A category filter matches either an unsplit parent category or an individual split row; split amounts are aggregated without also counting the parent amount. `transactionCount` remains the distinct number of matching transactions. Only active income and expense transactions owned by the current user are included; transfer legs are excluded from every total and from `transactionCount`. Results are ordered by currency, and a range with no qualifying activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error.
 
 Balance snapshots and transaction-driven balance changes currently share the account's `currentBalance` projection. A newly effective snapshot sets the observed balance; subsequent transaction changes apply deltas. Full automatic reconciliation between the ledger and observed snapshots is intentionally deferred to the dedicated reconciliation story.
 
