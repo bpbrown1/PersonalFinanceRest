@@ -13,6 +13,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 
@@ -35,6 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 class FinancialTransactionApiIT {
 
     private static final LocalDate TODAY = LocalDate.now(ZoneOffset.UTC);
@@ -65,6 +67,8 @@ class FinancialTransactionApiIT {
 
     @BeforeEach
     void clearLedger() {
+        jdbcTemplate.update("DELETE FROM budget_line");
+        jdbcTemplate.update("DELETE FROM budget");
         transactionRepository.deleteAll();
         snapshotRepository.deleteAll();
         jdbcTemplate.update("UPDATE transaction_category SET parent_id = NULL");

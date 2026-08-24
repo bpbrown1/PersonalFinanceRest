@@ -20,7 +20,7 @@ Activate the `dev` Spring profile to start the in-memory H2 database with repres
 SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 ```
 
-The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, and same-currency and cross-currency transfers. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
+The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, same-currency and cross-currency transfers, and a monthly budget with active and archived lines. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
 
 Production migrations remain in `db/migration`; sample data must stay under `dev/db/migration`. When a feature adds required tables, relationships, or useful frontend states, update the development seed and `DevelopmentDataIT` together. The fixed seed UUIDs should remain stable unless a relationship is intentionally replaced.
 
@@ -268,6 +268,35 @@ Retrieve active transaction totals grouped by account currency with:
 `income` and `spending` are positive fixed-decimal totals, and `netImpact` is income minus spending. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Optional `accountId`, `categoryId`, and `type` filters match the paged ledger semantics. A category filter matches either an unsplit parent category or an individual split row; split amounts are aggregated without also counting the parent amount. `transactionCount` remains the distinct number of matching transactions. Only active income and expense transactions owned by the current user are included; transfer legs are excluded from every total and from `transactionCount`. Results are ordered by currency, and a range with no qualifying activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error.
 
 Balance snapshots and transaction-driven balance changes currently share the account's `currentBalance` projection. A newly effective snapshot sets the observed balance; subsequent transaction changes apply deltas. Full automatic reconciliation between the ledger and observed snapshots is intentionally deferred to the dedicated reconciliation story.
+
+## Budget contract
+
+Create a monthly budget with `POST /api/v1/budgets`:
+
+```json
+{
+  "name": "August Spending Plan",
+  "currency": "USD",
+  "startDate": "2026-08-01",
+  "endDate": "2026-08-31",
+  "lines": [
+    { "categoryId": "50ea8ada-6436-4624-bbb9-a33c9a3631e2", "plannedAmount": 600.00 }
+  ]
+}
+```
+
+The dates must span one complete calendar month. Multiple owned budgets may cover the same month, including historical months. Lines use active, owned categories applicable to expenses or both transaction types, and a category can occur only once among all retained lines in a budget. Monetary amounts are non-negative and normalized to two decimals. `totalPlanned` is the sum of active lines only.
+
+- `GET /api/v1/budgets?status=active|archived|all` lists owned budgets; active is the default.
+- `GET /api/v1/budgets/{budgetId}` retrieves one owned budget.
+- `PUT /api/v1/budgets/{budgetId}` fully replaces its name, currency, and monthly period.
+- `POST /api/v1/budgets/{budgetId}/archive` and `/restore` change lifecycle state idempotently.
+- `POST /api/v1/budgets/{budgetId}/lines` appends a line.
+- `PUT /api/v1/budgets/{budgetId}/lines/{lineId}` replaces its category and amount.
+- `PUT /api/v1/budgets/{budgetId}/lines/reorder` accepts every retained line ID in the desired order.
+- `POST /api/v1/budgets/{budgetId}/lines/{lineId}/archive` and `/restore` preserve line history.
+
+Budget and line IDs remain stable, and responses include lifecycle timestamps plus the budget's optimistic-lock `version`. Archived budgets are immutable until restored; active historical budgets remain correctable. There are intentionally no permanent-delete endpoints. Actual-versus-planned progress is handled separately by US-049.
 
 ## Error contract
 
