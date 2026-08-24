@@ -1,5 +1,5 @@
 /**
- * Owner-scoped income, expense, and linked transfer ledger lifecycle, paged search, and account-balance
- * integration.
+ * Owner-scoped income, expense, linked transfer, and ordered category-split ledger lifecycle, paged search,
+ * reporting, and account-balance integration.
  */
 package com.personalfinance.personfinancerest.transaction;

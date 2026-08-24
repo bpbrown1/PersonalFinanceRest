@@ -21,8 +21,11 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Collection;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -54,13 +57,20 @@ class FinancialTransactionService {
         FinancialAccount account = lockOwnedAccounts(ownerId, Set.of(request.accountId())).get(request.accountId());
         ensureActiveAccount(account);
         validateDate(request.transactionDate(), account);
-        validateCategory(request.categoryId(), ownerId, request.type(), true);
+        BigDecimal amount = MoneyValues.amountOrZero(request.amount());
+        List<FinancialTransaction.SplitReplacement> splits = validateAllocation(
+                null, request.categoryId(), request.splits(), ownerId, request.type(), amount, true
+        );
+        if (splits.isEmpty()) {
+            validateCategory(request.categoryId(), ownerId, request.type(), true);
+        }
 
         FinancialTransaction transaction = new FinancialTransaction(
-                UUID.randomUUID(), ownerId, request.accountId(), request.categoryId(),
-                MoneyValues.amountOrZero(request.amount()), request.type(), request.transactionDate(),
+                UUID.randomUUID(), ownerId, request.accountId(), splits.isEmpty() ? request.categoryId() : null,
+                amount, request.type(), request.transactionDate(),
                 request.description(), request.merchantPayee(), request.notes(), request.externalReference()
         );
+        transaction.replaceSplits(splits);
         FinancialTransaction saved = repository.saveAndFlush(transaction);
         account.applyBalanceDelta(saved.balanceImpact());
         accountRepository.saveAndFlush(account);
@@ -116,16 +126,24 @@ class FinancialTransactionService {
         }
         validateDate(request.transactionDate(), newAccount);
 
-        boolean categoryChanged = !Objects.equals(transaction.getCategoryId(), request.categoryId());
-        validateCategory(request.categoryId(), ownerId, request.type(), categoryChanged);
+        BigDecimal amount = MoneyValues.amountOrZero(request.amount());
+        List<FinancialTransaction.SplitReplacement> splits = validateAllocation(
+                transaction, request.categoryId(), request.splits(), ownerId, request.type(), amount, false
+        );
+        if (splits.isEmpty()) {
+            boolean categoryChanged = !Objects.equals(transaction.getCategoryId(), request.categoryId())
+                    || !transaction.getSplits().isEmpty();
+            validateCategory(request.categoryId(), ownerId, request.type(), categoryChanged);
+        }
 
         BigDecimal oldImpact = transaction.getStatus() == TransactionStatus.ACTIVE
                 ? transaction.balanceImpact() : BigDecimal.ZERO;
         transaction.replace(
-                request.accountId(), request.categoryId(), MoneyValues.amountOrZero(request.amount()),
+                request.accountId(), splits.isEmpty() ? request.categoryId() : null, amount,
                 request.type(), request.transactionDate(), request.description(), request.merchantPayee(),
                 request.notes(), request.externalReference()
         );
+        transaction.replaceSplits(splits);
         BigDecimal newImpact = transaction.getStatus() == TransactionStatus.ACTIVE
                 ? transaction.balanceImpact() : BigDecimal.ZERO;
 
@@ -166,7 +184,18 @@ class FinancialTransactionService {
                     .get(transaction.getAccountId());
             ensureActiveAccount(account);
             validateDate(transaction.getTransactionDate(), account);
-            validateCategory(transaction.getCategoryId(), ownerId, transaction.getType(), false);
+            if (transaction.getSplits().isEmpty()) {
+                validateCategory(transaction.getCategoryId(), ownerId, transaction.getType(), false);
+            } else {
+                validateAllocation(
+                        transaction, null,
+                        transaction.getSplits().stream()
+                                .map(split -> new TransactionSplitRequest(
+                                        split.getId(), split.getCategoryId(), split.getAmount()))
+                                .toList(),
+                        ownerId, transaction.getType(), transaction.getAmount(), false
+                );
+            }
             account.applyBalanceDelta(transaction.balanceImpact());
             accountRepository.saveAndFlush(account);
             transaction.restore();
@@ -239,5 +268,100 @@ class FinancialTransactionService {
                     "Category applicability is incompatible with transaction type: " + categoryId
             );
         }
+    }
+
+    private List<FinancialTransaction.SplitReplacement> validateAllocation(
+            FinancialTransaction transaction,
+            UUID categoryId,
+            List<TransactionSplitRequest> requestedSplits,
+            UUID ownerId,
+            TransactionType type,
+            BigDecimal transactionAmount,
+            boolean creating
+    ) {
+        List<TransactionSplitRequest> splits = requestedSplits == null ? List.of() : requestedSplits;
+        if (splits.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, String> errors = new LinkedHashMap<>();
+        if (categoryId != null) {
+            errors.put("categoryId", "categoryId must be null when splits are supplied");
+        }
+        if (type.isTransfer()) {
+            errors.put("splits", "Transfers cannot be split");
+        } else if (splits.size() < 2) {
+            errors.put("splits", "At least two split rows are required");
+        }
+
+        Map<UUID, TransactionSplit> existingById = new HashMap<>();
+        if (transaction != null) {
+            transaction.getSplits().forEach(split -> existingById.put(split.getId(), split));
+        }
+        Set<UUID> suppliedIds = new HashSet<>();
+        Set<UUID> categoryIds = new HashSet<>();
+        List<FinancialTransaction.SplitReplacement> replacements = new ArrayList<>();
+        BigDecimal allocatedTotal = BigDecimal.ZERO.setScale(2);
+
+        for (int index = 0; index < splits.size(); index++) {
+            TransactionSplitRequest split = splits.get(index);
+            String fieldPrefix = "splits[" + index + "]";
+            UUID splitId = split.id();
+            TransactionSplit existing = splitId == null ? null : existingById.get(splitId);
+
+            if (creating && splitId != null) {
+                errors.put(fieldPrefix + ".id", "Split ids must be omitted when creating a transaction");
+            } else if (!creating && splitId != null && existing == null) {
+                errors.put(fieldPrefix + ".id", "Split id does not belong to this transaction");
+            } else if (splitId != null && !suppliedIds.add(splitId)) {
+                errors.put(fieldPrefix + ".id", "Split id is duplicated in the request");
+            }
+
+            BigDecimal amount = BigDecimal.ZERO.setScale(2);
+            if (split.amount() != null) {
+                try {
+                    amount = MoneyValues.amountOrZero(split.amount());
+                    allocatedTotal = allocatedTotal.add(amount);
+                    if (amount.signum() <= 0) {
+                        errors.put(fieldPrefix + ".amount", "Split amount must be positive");
+                    }
+                } catch (ArithmeticException exception) {
+                    errors.put(fieldPrefix + ".amount", "Amount must use at most two decimal places");
+                }
+            }
+
+            UUID splitCategoryId = split.categoryId();
+            if (splitCategoryId != null) {
+                if (!categoryIds.add(splitCategoryId)) {
+                    errors.put("splits", "Split categories must be unique");
+                }
+                TransactionCategory splitCategory = categoryRepository.findByIdAndOwnerId(splitCategoryId, ownerId)
+                        .orElse(null);
+                if (splitCategory == null) {
+                    errors.put(fieldPrefix + ".categoryId", "Category does not belong to the current owner");
+                } else {
+                    boolean categoryUnchanged = existing != null
+                            && existing.getCategoryId().equals(splitCategoryId);
+                    if (!categoryUnchanged && splitCategory.getStatus() == CategoryStatus.ARCHIVED) {
+                        errors.put(fieldPrefix + ".categoryId", "An archived category cannot be assigned");
+                    }
+                    boolean compatible = splitCategory.getApplicability() == CategoryApplicability.BOTH
+                            || splitCategory.getApplicability().name().equals(type.name());
+                    if (!compatible) {
+                        errors.put(fieldPrefix + ".categoryId",
+                                "Category applicability is incompatible with transaction type");
+                    }
+                }
+            }
+            replacements.add(new FinancialTransaction.SplitReplacement(splitId, splitCategoryId, amount));
+        }
+
+        if (allocatedTotal.compareTo(transactionAmount) != 0) {
+            errors.putIfAbsent("splits", "Split amounts must exactly equal the transaction amount");
+        }
+        if (!errors.isEmpty()) {
+            throw new InvalidTransactionAllocationException(errors);
+        }
+        return List.copyOf(replacements);
     }
 }

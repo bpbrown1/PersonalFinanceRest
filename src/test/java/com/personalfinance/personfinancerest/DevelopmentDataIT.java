@@ -35,6 +35,8 @@ class DevelopmentDataIT {
         mockMvc.perform(get("/api/v1/transactions").queryParam("status", "all"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items.length()").value(10))
+                .andExpect(jsonPath("$.items[?(@.description == 'Weekly groceries')].splits[0].amount")
+                        .value(org.hamcrest.Matchers.contains(100.0)))
                 .andExpect(jsonPath("$.totalElements").value(10));
 
         mockMvc.perform(get("/api/v1/transactions")

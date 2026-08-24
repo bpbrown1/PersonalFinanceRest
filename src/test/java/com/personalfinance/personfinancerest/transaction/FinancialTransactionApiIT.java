@@ -19,6 +19,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -373,6 +374,216 @@ class FinancialTransactionApiIT {
     }
 
     @Test
+    void createsSearchesAndSummarizesAnOrderedSplitTransaction() throws Exception {
+        UUID accountId = createAccount("Checking", "100.00");
+        UUID groceriesId = createCategory("Groceries", "expense");
+        UUID diningId = createCategory("Dining", "expense");
+
+        String response = mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "100.00", "expense", null, List.of(
+                                new SplitRow(null, groceriesId, "60.00"),
+                                new SplitRow(null, diningId, "40.00")
+                        )))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.categoryId").isEmpty())
+                .andExpect(jsonPath("$.splits.length()").value(2))
+                .andExpect(jsonPath("$.splits[0].position").value(0))
+                .andExpect(jsonPath("$.splits[0].categoryId").value(groceriesId.toString()))
+                .andExpect(jsonPath("$.splits[0].amount").value(60.0))
+                .andExpect(jsonPath("$.splits[0].id").isNotEmpty())
+                .andExpect(jsonPath("$.splits[1].position").value(1))
+                .andReturn().getResponse().getContentAsString();
+
+        UUID transactionId = UUID.fromString(objectMapper.readTree(response).get("id").asText());
+        mockMvc.perform(get("/api/v1/transactions").queryParam("categoryId", diningId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(transactionId.toString()))
+                .andExpect(jsonPath("$.items[0].splits.length()").value(2));
+
+        mockMvc.perform(get("/api/v1/transactions/summary").queryParam("categoryId", groceriesId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].spending").value(60.0))
+                .andExpect(jsonPath("$[0].transactionCount").value(1));
+        mockMvc.perform(get("/api/v1/transactions/summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].spending").value(100.0))
+                .andExpect(jsonPath("$[0].transactionCount").value(1));
+        assertBalance(accountId, "0.00");
+    }
+
+    @Test
+    void replacesSplitRowsByIdAndCanReturnToASingleCategory() throws Exception {
+        UUID accountId = createAccount("Checking", "100.00");
+        UUID groceriesId = createCategory("Groceries", "expense");
+        UUID diningId = createCategory("Dining", "expense");
+        UUID travelId = createCategory("Travel", "expense");
+        String created = mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "50.00", "expense", null, List.of(
+                                new SplitRow(null, groceriesId, "30.00"),
+                                new SplitRow(null, diningId, "20.00")
+                        )))))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        UUID transactionId = UUID.fromString(objectMapper.readTree(created).get("id").asText());
+        UUID retainedSplitId = UUID.fromString(objectMapper.readTree(created)
+                .get("splits").get(1).get("id").asText());
+
+        mockMvc.perform(put("/api/v1/transactions/{transactionId}", transactionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "50.00", "expense", null, List.of(
+                                new SplitRow(retainedSplitId, diningId, "15.00"),
+                                new SplitRow(null, travelId, "35.00")
+                        )))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.splits.length()").value(2))
+                .andExpect(jsonPath("$.splits[0].id").value(retainedSplitId.toString()))
+                .andExpect(jsonPath("$.splits[0].position").value(0))
+                .andExpect(jsonPath("$.splits[1].categoryId").value(travelId.toString()));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM transaction_split WHERE transaction_id = ?", Integer.class, transactionId
+        )).isEqualTo(2);
+
+        mockMvc.perform(put("/api/v1/transactions/{transactionId}", transactionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(new Payload(accountId, "50.00", TODAY, "Single category", "expense",
+                                groceriesId, null, null, null))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.categoryId").value(groceriesId.toString()))
+                .andExpect(jsonPath("$.splits.length()").value(0));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM transaction_split WHERE transaction_id = ?", Integer.class, transactionId
+        )).isZero();
+    }
+
+    @Test
+    void returnsIndexedSplitValidationErrorsWithoutPartialPersistence() throws Exception {
+        UUID accountId = createAccount("Checking", "100.00");
+        UUID groceriesId = createCategory("Groceries", "expense");
+        UUID diningId = createCategory("Dining", "expense");
+
+        mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "50.00", "expense", groceriesId, List.of(
+                                new SplitRow(UUID.randomUUID(), groceriesId, "20.00"),
+                                new SplitRow(null, groceriesId, "20.00")
+                        )))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.categoryId").exists())
+                .andExpect(jsonPath("$.fieldErrors.splits").exists())
+                .andExpect(jsonPath("$.fieldErrors['splits[0].id']").exists());
+
+        mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "50.00", "expense", null, List.of(
+                                new SplitRow(null, groceriesId, "20.00"),
+                                new SplitRow(null, diningId, "20.00")
+                        )))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.splits")
+                        .value("Split amounts must exactly equal the transaction amount"));
+
+        mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "50.00", "expense", null, List.of(
+                                new SplitRow(null, UUID.randomUUID(), "25.00"),
+                                new SplitRow(null, diningId, "25.00")
+                        )))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors['splits[0].categoryId']").exists());
+        assertThat(transactionRepository.count()).isZero();
+        assertBalance(accountId, "100.00");
+    }
+
+    @Test
+    void retainsSplitsAcrossDeleteRestoreAndAllowsUnchangedArchivedRows() throws Exception {
+        UUID accountId = createAccount("Checking", "100.00");
+        UUID groceriesId = createCategory("Groceries", "expense");
+        UUID diningId = createCategory("Dining", "expense");
+        String created = mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "30.00", "expense", null, List.of(
+                                new SplitRow(null, groceriesId, "10.00"),
+                                new SplitRow(null, diningId, "20.00")
+                        )))))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        UUID transactionId = UUID.fromString(objectMapper.readTree(created).get("id").asText());
+        UUID groceriesSplitId = UUID.fromString(objectMapper.readTree(created)
+                .get("splits").get(0).get("id").asText());
+        UUID diningSplitId = UUID.fromString(objectMapper.readTree(created)
+                .get("splits").get(1).get("id").asText());
+        mockMvc.perform(post("/api/v1/categories/{categoryId}/archive", groceriesId)).andExpect(status().isOk());
+
+        mockMvc.perform(put("/api/v1/transactions/{transactionId}", transactionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "30.00", "expense", null, List.of(
+                                new SplitRow(groceriesSplitId, groceriesId, "10.00"),
+                                new SplitRow(diningSplitId, diningId, "20.00")
+                        )))))
+                .andExpect(status().isOk());
+        mockMvc.perform(delete("/api/v1/transactions/{transactionId}", transactionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.splits.length()").value(2));
+        mockMvc.perform(post("/api/v1/transactions/{transactionId}/restore", transactionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.splits[0].id").value(groceriesSplitId.toString()));
+        assertBalance(accountId, "70.00");
+    }
+
+    @Test
+    void rejectsSplitIdsFromAnotherTransactionAndNewArchivedAssociationsAtomically() throws Exception {
+        UUID accountId = createAccount("Checking", "200.00");
+        UUID groceriesId = createCategory("Groceries", "expense");
+        UUID diningId = createCategory("Dining", "expense");
+        UUID travelId = createCategory("Travel", "expense");
+        String first = mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "50.00", "expense", null, List.of(
+                                new SplitRow(null, groceriesId, "30.00"),
+                                new SplitRow(null, diningId, "20.00")
+                        )))))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String second = mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "40.00", "expense", null, List.of(
+                                new SplitRow(null, diningId, "10.00"),
+                                new SplitRow(null, travelId, "30.00")
+                        )))))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        UUID firstTransactionId = UUID.fromString(objectMapper.readTree(first).get("id").asText());
+        UUID firstSplitId = UUID.fromString(objectMapper.readTree(first).get("splits").get(0).get("id").asText());
+        UUID foreignSplitId = UUID.fromString(objectMapper.readTree(second).get("splits").get(0).get("id").asText());
+
+        mockMvc.perform(put("/api/v1/transactions/{transactionId}", firstTransactionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "50.00", "expense", null, List.of(
+                                new SplitRow(firstSplitId, groceriesId, "30.00"),
+                                new SplitRow(foreignSplitId, diningId, "20.00")
+                        )))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors['splits[1].id']")
+                        .value("Split id does not belong to this transaction"));
+
+        mockMvc.perform(post("/api/v1/categories/{categoryId}/archive", travelId)).andExpect(status().isOk());
+        mockMvc.perform(put("/api/v1/transactions/{transactionId}", firstTransactionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "50.00", "expense", null, List.of(
+                                new SplitRow(firstSplitId, groceriesId, "30.00"),
+                                new SplitRow(null, travelId, "20.00")
+                        )))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors['splits[1].categoryId']")
+                        .value("An archived category cannot be assigned"));
+
+        mockMvc.perform(get("/api/v1/transactions/{transactionId}", firstTransactionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.splits[0].amount").value(30.0))
+                .andExpect(jsonPath("$.splits[1].amount").value(20.0));
+        assertBalance(accountId, "110.00");
+    }
+
+    @Test
     void movesATransactionBetweenAccountsAndUpdatesBothBalances() throws Exception {
         UUID checkingId = createAccount("Checking", "100.00");
         UUID cashId = createAccount("Cash", "50.00");
@@ -560,6 +771,14 @@ class FinancialTransactionApiIT {
         return objectMapper.writeValueAsString(value);
     }
 
+    private SplitPayload splitPayload(UUID accountId, String amount, String type, UUID categoryId,
+                                      List<SplitRow> splits) {
+        return new SplitPayload(
+                accountId, amount, TODAY, "Split transaction", type, categoryId, splits,
+                null, null, null
+        );
+    }
+
     private void assertBalance(UUID accountId, String expected) {
         assertThat(accountRepository.findById(accountId).orElseThrow().getCurrentBalance())
                 .isEqualByComparingTo(expected);
@@ -576,5 +795,22 @@ class FinancialTransactionApiIT {
             String notes,
             String externalReference
     ) {
+    }
+
+    private record SplitPayload(
+            UUID accountId,
+            String amount,
+            LocalDate transactionDate,
+            String description,
+            String type,
+            UUID categoryId,
+            List<SplitRow> splits,
+            String merchantPayee,
+            String notes,
+            String externalReference
+    ) {
+    }
+
+    private record SplitRow(UUID id, UUID categoryId, String amount) {
     }
 }

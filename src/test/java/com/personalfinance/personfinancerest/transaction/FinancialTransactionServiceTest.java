@@ -189,7 +189,7 @@ class FinancialTransactionServiceTest {
         givenOwnerAndLockedAccount(account);
         CreateTransactionRequest beforeOpening = new CreateTransactionRequest(
                 accountId, new BigDecimal("10.00"), account.getOpeningDate().minusDays(1),
-                "Invalid", TransactionType.EXPENSE, null, null, null, null
+                "Invalid", TransactionType.EXPENSE, null, null, null, null, null
         );
         assertThatThrownBy(() -> service.create(beforeOpening))
                 .isInstanceOf(TransactionConflictException.class).hasMessageContaining("opening date");
@@ -284,7 +284,7 @@ class FinancialTransactionServiceTest {
     private CreateTransactionRequest createRequest(String amount, TransactionType type, UUID categoryId) {
         return new CreateTransactionRequest(
                 accountId, new BigDecimal(amount), transactionDate, "Groceries", type,
-                categoryId, "Market", null, null
+                categoryId, null, "Market", null, null
         );
     }
 
@@ -292,7 +292,7 @@ class FinancialTransactionServiceTest {
                                                    TransactionType type, UUID categoryId) {
         return new UpdateTransactionRequest(
                 targetAccountId, new BigDecimal(amount), transactionDate, "Updated", type,
-                categoryId, null, null, null
+                categoryId, null, null, null, null
         );
     }
 }

@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import java.util.List;
 
 public record TransactionResponse(
         UUID id,
@@ -11,6 +12,7 @@ public record TransactionResponse(
         UUID accountId,
         UUID categoryId,
         UUID transferId,
+        List<TransactionSplitResponse> splits,
         BigDecimal amount,
         BigDecimal balanceImpact,
         TransactionType type,
@@ -27,7 +29,9 @@ public record TransactionResponse(
     static TransactionResponse from(FinancialTransaction transaction) {
         return new TransactionResponse(
                 transaction.getId(), transaction.getOwnerId(), transaction.getAccountId(),
-                transaction.getCategoryId(), transaction.getTransferId(), transaction.getAmount(), transaction.balanceImpact(),
+                transaction.getCategoryId(), transaction.getTransferId(),
+                transaction.getSplits().stream().map(TransactionSplitResponse::from).toList(),
+                transaction.getAmount(), transaction.balanceImpact(),
                 transaction.getType(), transaction.getTransactionDate(), transaction.getDescription(),
                 transaction.getMerchantPayee(), transaction.getNotes(), transaction.getExternalReference(),
                 transaction.getStatus(), transaction.getDeletedAt(), transaction.getCreatedAt(),

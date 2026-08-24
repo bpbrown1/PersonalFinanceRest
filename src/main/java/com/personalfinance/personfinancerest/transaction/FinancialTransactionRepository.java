@@ -30,17 +30,20 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
 
     @Query("""
             select account.currency as currency,
-                   sum(case when entry.type = :incomeType then entry.amount else 0 end) as income,
-                   sum(case when entry.type = :expenseType then entry.amount else 0 end) as spending,
-                   count(entry.id) as transactionCount
+                   sum(case when entry.type = :incomeType then coalesce(split.amount, entry.amount) else 0 end) as income,
+                   sum(case when entry.type = :expenseType then coalesce(split.amount, entry.amount) else 0 end) as spending,
+                   count(distinct entry.id) as transactionCount
             from FinancialTransaction entry, FinancialAccount account
+            left join entry.splits split
             where account.id = entry.accountId
               and account.ownerId = entry.ownerId
               and entry.ownerId = :ownerId
               and entry.deletedAt is null
               and entry.type in (:incomeType, :expenseType)
               and (:accountId is null or entry.accountId = :accountId)
-              and (:categoryId is null or entry.categoryId = :categoryId)
+              and (:categoryId is null
+                   or (split.id is null and entry.categoryId = :categoryId)
+                   or split.categoryId = :categoryId)
               and (:transactionType is null or entry.type = :transactionType)
               and (:fromDate is null or entry.transactionDate >= :fromDate)
               and (:toDate is null or entry.transactionDate <= :toDate)

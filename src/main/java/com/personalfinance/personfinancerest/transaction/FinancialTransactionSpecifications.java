@@ -2,6 +2,8 @@ package com.personalfinance.personfinancerest.transaction;
 
 import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.util.ArrayList;
@@ -33,7 +35,16 @@ final class FinancialTransactionSpecifications {
                 predicates.add(builder.lessThanOrEqualTo(root.get("transactionDate"), criteria.to()));
             }
             if (criteria.categoryId() != null) {
-                predicates.add(builder.equal(root.get("categoryId"), criteria.categoryId()));
+                Subquery<Integer> splitMatch = query.subquery(Integer.class);
+                Root<TransactionSplit> split = splitMatch.from(TransactionSplit.class);
+                splitMatch.select(builder.literal(1)).where(
+                        builder.equal(split.get("transaction").get("id"), root.get("id")),
+                        builder.equal(split.get("categoryId"), criteria.categoryId())
+                );
+                predicates.add(builder.or(
+                        builder.equal(root.get("categoryId"), criteria.categoryId()),
+                        builder.exists(splitMatch)
+                ));
             }
             if (criteria.type() != null) {
                 predicates.add(builder.equal(root.get("type"), criteria.type()));
