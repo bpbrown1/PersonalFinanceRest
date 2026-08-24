@@ -47,6 +47,7 @@ class FinancialTransactionService {
 
     @Transactional
     TransactionResponse create(CreateTransactionRequest request) {
+        ensureStandaloneType(request.type());
         UUID ownerId = currentUserProvider.userId();
         FinancialAccount account = lockOwnedAccounts(ownerId, Set.of(request.accountId())).get(request.accountId());
         ensureActiveAccount(account);
@@ -99,6 +100,8 @@ class FinancialTransactionService {
     TransactionResponse update(UUID transactionId, UpdateTransactionRequest request) {
         UUID ownerId = currentUserProvider.userId();
         FinancialTransaction transaction = findOwnedTransaction(transactionId);
+        ensureStandaloneTransaction(transaction);
+        ensureStandaloneType(request.type());
         UUID oldAccountId = transaction.getAccountId();
         Map<UUID, FinancialAccount> accounts = lockOwnedAccounts(
                 ownerId, List.of(oldAccountId, request.accountId())
@@ -138,6 +141,7 @@ class FinancialTransactionService {
     TransactionResponse delete(UUID transactionId) {
         UUID ownerId = currentUserProvider.userId();
         FinancialTransaction transaction = findOwnedTransaction(transactionId);
+        ensureStandaloneTransaction(transaction);
         if (transaction.getStatus() == TransactionStatus.ACTIVE) {
             FinancialAccount account = lockOwnedAccounts(ownerId, Set.of(transaction.getAccountId()))
                     .get(transaction.getAccountId());
@@ -152,6 +156,7 @@ class FinancialTransactionService {
     TransactionResponse restore(UUID transactionId) {
         UUID ownerId = currentUserProvider.userId();
         FinancialTransaction transaction = findOwnedTransaction(transactionId);
+        ensureStandaloneTransaction(transaction);
         if (transaction.getStatus() == TransactionStatus.DELETED) {
             FinancialAccount account = lockOwnedAccounts(ownerId, Set.of(transaction.getAccountId()))
                     .get(transaction.getAccountId());
@@ -168,6 +173,18 @@ class FinancialTransactionService {
     private FinancialTransaction findOwnedTransaction(UUID transactionId) {
         return repository.findByIdAndOwnerId(transactionId, currentUserProvider.userId())
                 .orElseThrow(() -> new TransactionNotFoundException(transactionId));
+    }
+
+    private void ensureStandaloneType(TransactionType type) {
+        if (type.isTransfer()) {
+            throw new TransactionConflictException("Transfer legs must be managed through /api/v1/transfers");
+        }
+    }
+
+    private void ensureStandaloneTransaction(FinancialTransaction transaction) {
+        if (transaction.getTransferId() != null) {
+            throw new TransactionConflictException("Transfer legs must be managed through /api/v1/transfers");
+        }
     }
 
     private Map<UUID, FinancialAccount> lockOwnedAccounts(UUID ownerId, Collection<UUID> accountIds) {

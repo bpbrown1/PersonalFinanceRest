@@ -31,6 +31,9 @@ public class FinancialTransaction {
     @Column(name = "category_id")
     private UUID categoryId;
 
+    @Column(name = "transfer_id")
+    private UUID transferId;
+
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
 
@@ -74,6 +77,21 @@ public class FinancialTransaction {
                 merchantPayee, notes, externalReference);
     }
 
+    static FinancialTransaction transferLeg(UUID id, UUID transferId, UUID ownerId, UUID accountId,
+                                            BigDecimal amount, TransactionType type,
+                                            LocalDate transactionDate, String description,
+                                            String notes, String externalReference) {
+        if (!type.isTransfer()) {
+            throw new IllegalArgumentException("A transfer leg requires a transfer transaction type");
+        }
+        FinancialTransaction leg = new FinancialTransaction(
+                id, ownerId, accountId, null, amount, type, transactionDate,
+                description, null, notes, externalReference
+        );
+        leg.transferId = transferId;
+        return leg;
+    }
+
     @PrePersist
     void recordCreationTime() {
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
@@ -96,6 +114,23 @@ public class FinancialTransaction {
         this.transactionDate = transactionDate;
         this.description = description.trim();
         this.merchantPayee = normalizeOptional(merchantPayee);
+        this.notes = normalizeOptional(notes);
+        this.externalReference = normalizeOptional(externalReference);
+    }
+
+    void replaceTransferLeg(UUID accountId, BigDecimal amount, TransactionType type,
+                            LocalDate transactionDate, String description, String notes,
+                            String externalReference) {
+        if (!type.isTransfer()) {
+            throw new IllegalArgumentException("A transfer leg requires a transfer transaction type");
+        }
+        this.accountId = accountId;
+        this.categoryId = null;
+        this.amount = amount;
+        this.type = type;
+        this.transactionDate = transactionDate;
+        this.description = description.trim();
+        this.merchantPayee = null;
         this.notes = normalizeOptional(notes);
         this.externalReference = normalizeOptional(externalReference);
     }
@@ -135,6 +170,10 @@ public class FinancialTransaction {
 
     public UUID getCategoryId() {
         return categoryId;
+    }
+
+    public UUID getTransferId() {
+        return transferId;
     }
 
     public BigDecimal getAmount() {

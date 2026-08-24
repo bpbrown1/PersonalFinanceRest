@@ -20,7 +20,7 @@ Activate the `dev` Spring profile to start the in-memory H2 database with repres
 SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 ```
 
-The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, and active and recoverably deleted transactions. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
+The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, and same-currency and cross-currency transfers. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
 
 Production migrations remain in `db/migration`; sample data must stay under `dev/db/migration`. When a feature adds required tables, relationships, or useful frontend states, update the development seed and `DevelopmentDataIT` together. The fixed seed UUIDs should remain stable unless a relationship is intentionally replaced.
 
@@ -177,6 +177,31 @@ Record income or spending with `POST /api/v1/transactions`:
 
 Transactions require an active owned account, cannot predate that account's opening date or be future-dated, and may reference an active owned category compatible with their type. A retained archived category remains available to its existing transaction, preserving history. Even deleted transactions count as account activity, so currency and opening terms remain protected.
 
+## Transfer contract
+
+Record an atomic transfer with `POST /api/v1/transfers`:
+
+```json
+{
+  "sourceAccountId": "0dfae49e-6765-4f9f-b485-53d17338a106",
+  "destinationAccountId": "70dbce4a-1e87-43cf-9fac-4ffeb0185690",
+  "sourceAmount": 100.00,
+  "destinationAmount": 92.00,
+  "transactionDate": "2026-08-23",
+  "description": "Travel cash exchange",
+  "notes": null,
+  "externalReference": null
+}
+```
+
+The source and destination accounts must be distinct, active, owned accounts. Same-currency transfers require equal amounts; cross-currency transfers require explicit source and destination amounts and do not infer an exchange rate. Each transfer is stored as linked `transfer_out` and `transfer_in` ledger entries sharing a `transferId`. Those legs appear in the transaction ledger but must be changed only through the aggregate transfer endpoints.
+
+- `GET /api/v1/transfers` lists active transfers; `status=deleted|all` selects other lifecycle views.
+- `GET /api/v1/transfers/{transferId}` retrieves one owned transfer.
+- `PUT /api/v1/transfers/{transferId}` atomically replaces both linked legs.
+- `DELETE /api/v1/transfers/{transferId}` soft-deletes both legs and reverses both balance impacts.
+- `POST /api/v1/transfers/{transferId}/restore` restores both legs and reapplies both impacts.
+
 Retrieve active transaction totals grouped by account currency with:
 
 `GET /api/v1/transactions/summary?from=2026-08-01&to=2026-08-31`
@@ -193,7 +218,7 @@ Retrieve active transaction totals grouped by account currency with:
 ]
 ```
 
-`income` and `spending` are positive fixed-decimal totals, and `netImpact` is income minus spending. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Only active transactions owned by the current user are included. Results are ordered by currency, and a range with no activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error. US-008 will add the same account, category, and type filters to both summaries and paginated ledger retrieval.
+`income` and `spending` are positive fixed-decimal totals, and `netImpact` is income minus spending. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Only active income and expense transactions owned by the current user are included; transfer legs are excluded from every total and from `transactionCount`. Results are ordered by currency, and a range with no qualifying activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error. US-008 will add the same account, category, and type filters to both summaries and paginated ledger retrieval.
 
 Balance snapshots and transaction-driven balance changes currently share the account's `currentBalance` projection. A newly effective snapshot sets the observed balance; subsequent transaction changes apply deltas. Full automatic reconciliation between the ledger and observed snapshots is intentionally deferred to the dedicated reconciliation story.
 

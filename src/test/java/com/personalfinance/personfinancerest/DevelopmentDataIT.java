@@ -26,7 +26,7 @@ class DevelopmentDataIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(4))
                 .andExpect(jsonPath("$[?(@.name == 'Everyday Checking')].currentBalance")
-                        .value(org.hamcrest.Matchers.contains(5626.35)));
+                        .value(org.hamcrest.Matchers.contains(5026.35)));
 
         mockMvc.perform(get("/api/v1/categories").queryParam("status", "all"))
                 .andExpect(status().isOk())
@@ -34,7 +34,15 @@ class DevelopmentDataIT {
 
         mockMvc.perform(get("/api/v1/transactions").queryParam("status", "all"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(6));
+                .andExpect(jsonPath("$.length()").value(10));
+
+        mockMvc.perform(get("/api/v1/transfers"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[?(@.description == 'Travel cash exchange')].sourceAmount")
+                        .value(org.hamcrest.Matchers.contains(100.0)))
+                .andExpect(jsonPath("$[?(@.description == 'Travel cash exchange')].destinationAmount")
+                        .value(org.hamcrest.Matchers.contains(92.0)));
 
         mockMvc.perform(get("/api/v1/transactions/summary"))
                 .andExpect(status().isOk())
