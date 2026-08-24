@@ -1,6 +1,7 @@
 package com.personalfinance.personfinancerest.transaction;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -9,13 +10,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-public interface FinancialTransactionRepository extends JpaRepository<FinancialTransaction, UUID> {
-
-    List<FinancialTransaction> findAllByOwnerIdOrderByTransactionDateDescCreatedAtDesc(UUID ownerId);
-
-    List<FinancialTransaction> findAllByOwnerIdAndDeletedAtIsNullOrderByTransactionDateDescCreatedAtDesc(UUID ownerId);
-
-    List<FinancialTransaction> findAllByOwnerIdAndDeletedAtIsNotNullOrderByTransactionDateDescCreatedAtDesc(UUID ownerId);
+public interface FinancialTransactionRepository extends JpaRepository<FinancialTransaction, UUID>,
+        JpaSpecificationExecutor<FinancialTransaction> {
 
     Optional<FinancialTransaction> findByIdAndOwnerId(UUID id, UUID ownerId);
 
@@ -43,6 +39,9 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
               and entry.ownerId = :ownerId
               and entry.deletedAt is null
               and entry.type in (:incomeType, :expenseType)
+              and (:accountId is null or entry.accountId = :accountId)
+              and (:categoryId is null or entry.categoryId = :categoryId)
+              and (:transactionType is null or entry.type = :transactionType)
               and (:fromDate is null or entry.transactionDate >= :fromDate)
               and (:toDate is null or entry.transactionDate <= :toDate)
             group by account.currency
@@ -53,7 +52,10 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
             @Param("fromDate") LocalDate from,
             @Param("toDate") LocalDate to,
             @Param("incomeType") TransactionType incomeType,
-            @Param("expenseType") TransactionType expenseType
+            @Param("expenseType") TransactionType expenseType,
+            @Param("accountId") UUID accountId,
+            @Param("categoryId") UUID categoryId,
+            @Param("transactionType") TransactionType transactionType
     );
 
     boolean existsByAccountId(UUID accountId);

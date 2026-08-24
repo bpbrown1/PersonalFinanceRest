@@ -77,8 +77,15 @@ class TransferApiIT {
         assertBalance(destination, "70.00");
         mockMvc.perform(get("/api/v1/transactions"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[0].transferId").value(transferId.toString()));
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.items[0].transferId").value(transferId.toString()));
+        mockMvc.perform(get("/api/v1/transactions")
+                        .queryParam("type", "transfer_out")
+                        .queryParam("accountId", source.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].type").value("transfer_out"))
+                .andExpect(jsonPath("$.items[0].transferId").value(transferId.toString()));
         mockMvc.perform(get("/api/v1/transactions/summary"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
     }

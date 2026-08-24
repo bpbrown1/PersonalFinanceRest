@@ -167,15 +167,39 @@ Record income or spending with `POST /api/v1/transactions`:
 
 `amount` is always a positive magnitude. Supported types are `income` and `expense`; the response's `balanceImpact` is positive for income and negative for expense. Creating, replacing, deleting, restoring, or moving an active transaction updates the affected account balances by the net change.
 
-- `GET /api/v1/transactions` returns active owned transactions, newest transaction date first.
-- `GET /api/v1/transactions?status=deleted` returns soft-deleted transactions.
-- `GET /api/v1/transactions?status=all` returns both lifecycle states.
+- `GET /api/v1/transactions` returns the first page of active owned transactions.
+- `GET /api/v1/transactions?status=deleted` searches soft-deleted transactions.
+- `GET /api/v1/transactions?status=all` searches both lifecycle states.
 - `GET /api/v1/transactions/{transactionId}` retrieves one owned transaction.
 - `PUT /api/v1/transactions/{transactionId}` fully replaces its editable fields; nullable optional fields can therefore be cleared.
 - `DELETE /api/v1/transactions/{transactionId}` soft-deletes it idempotently and reverses its balance impact.
 - `POST /api/v1/transactions/{transactionId}/restore` restores it idempotently and reapplies its balance impact.
 
 Transactions require an active owned account, cannot predate that account's opening date or be future-dated, and may reference an active owned category compatible with their type. A retained archived category remains available to its existing transaction, preserving history. Even deleted transactions count as account activity, so currency and opening terms remain protected.
+
+Transaction search supports these combinable query parameters:
+
+- `accountId`, inclusive `from` and `to` dates, `categoryId`, and `type`.
+- Inclusive `minAmount` and `maxAmount` positive-magnitude boundaries.
+- Case-insensitive `text` matching description, merchant/payee, notes, or external reference.
+- Zero-based `page` (default `0`) and `size` from 1 through 100 (default `25`).
+- `sort=date|amount` and `direction=asc|desc` (defaults `date,desc`).
+
+The response is a stable page envelope:
+
+```json
+{
+  "items": [],
+  "page": 0,
+  "size": 25,
+  "totalElements": 0,
+  "totalPages": 0,
+  "sortBy": "date",
+  "sortDirection": "desc"
+}
+```
+
+Date and amount boundaries are inclusive. Filters combine with AND. Date sorting uses creation time and ID tie-breakers; amount sorting uses transaction date and ID tie-breakers. Invalid ranges, page sizes, types, or sort values use the shared field-error response.
 
 ## Transfer contract
 
@@ -218,7 +242,7 @@ Retrieve active transaction totals grouped by account currency with:
 ]
 ```
 
-`income` and `spending` are positive fixed-decimal totals, and `netImpact` is income minus spending. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Only active income and expense transactions owned by the current user are included; transfer legs are excluded from every total and from `transactionCount`. Results are ordered by currency, and a range with no qualifying activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error. US-008 will add the same account, category, and type filters to both summaries and paginated ledger retrieval.
+`income` and `spending` are positive fixed-decimal totals, and `netImpact` is income minus spending. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Optional `accountId`, `categoryId`, and `type` filters match the paged ledger semantics. Only active income and expense transactions owned by the current user are included; transfer legs are excluded from every total and from `transactionCount`. Results are ordered by currency, and a range with no qualifying activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error.
 
 Balance snapshots and transaction-driven balance changes currently share the account's `currentBalance` projection. A newly effective snapshot sets the observed balance; subsequent transaction changes apply deltas. Full automatic reconciliation between the ledger and observed snapshots is intentionally deferred to the dedicated reconciliation story.
 

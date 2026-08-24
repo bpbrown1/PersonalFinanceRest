@@ -14,6 +14,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -193,18 +196,24 @@ class FinancialTransactionServiceTest {
     }
 
     @Test
-    void selectsTheRequestedOwnerScopedList() {
+    @SuppressWarnings("unchecked")
+    void returnsAnOwnerScopedPageWithRequestedMetadata() {
         given(currentUserProvider.userId()).willReturn(ownerId);
-        given(repository.findAllByOwnerIdAndDeletedAtIsNullOrderByTransactionDateDescCreatedAtDesc(ownerId))
-                .willReturn(List.of(transaction));
-        given(repository.findAllByOwnerIdAndDeletedAtIsNotNullOrderByTransactionDateDescCreatedAtDesc(ownerId))
-                .willReturn(List.of(transaction));
-        given(repository.findAllByOwnerIdOrderByTransactionDateDescCreatedAtDesc(ownerId))
-                .willReturn(List.of(transaction));
+        given(repository.findAll(any(Specification.class), any(Pageable.class)))
+                .willReturn(new PageImpl<>(List.of(transaction)));
+        TransactionSearchCriteria criteria = TransactionSearchCriteria.from(
+                "active", null, null, null, null, null, null, null,
+                null, 0, 25, "date", "desc"
+        );
 
-        assertThat(service.findAll(TransactionStatusFilter.ACTIVE)).hasSize(1);
-        assertThat(service.findAll(TransactionStatusFilter.DELETED)).hasSize(1);
-        assertThat(service.findAll(TransactionStatusFilter.ALL)).hasSize(1);
+        TransactionPageResponse response = service.search(criteria);
+
+        assertThat(response.items()).hasSize(1);
+        assertThat(response.page()).isZero();
+        assertThat(response.size()).isEqualTo(1);
+        assertThat(response.totalElements()).isEqualTo(1);
+        assertThat(response.sortBy()).isEqualTo("date");
+        assertThat(response.sortDirection()).isEqualTo("desc");
     }
 
     @Test
@@ -217,7 +226,7 @@ class FinancialTransactionServiceTest {
         given(currentUserProvider.userId()).willReturn(ownerId);
         given(repository.summarize(
                 ownerId, transactionDate.minusDays(1), transactionDate,
-                TransactionType.INCOME, TransactionType.EXPENSE
+                TransactionType.INCOME, TransactionType.EXPENSE, null, null, null
         )).willReturn(List.of(aggregate));
 
         TransactionSummaryResponse response = service.summarize(
@@ -237,7 +246,9 @@ class FinancialTransactionServiceTest {
                 .isInstanceOf(InvalidTransactionDateRangeException.class)
                 .hasMessage("from must be on or before to");
 
-        verify(repository, never()).summarize(any(), any(), any(), any(), any());
+        verify(repository, never()).summarize(
+                any(), any(), any(), any(), any(), any(), any(), any()
+        );
     }
 
     private void givenOwnerAndLockedAccount(FinancialAccount lockedAccount) {
