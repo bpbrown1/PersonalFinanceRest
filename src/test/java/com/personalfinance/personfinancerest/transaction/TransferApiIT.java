@@ -49,6 +49,8 @@ class TransferApiIT {
 
     @BeforeEach
     void clearLedger() {
+        jdbcTemplate.update("DELETE FROM budget_line");
+        jdbcTemplate.update("DELETE FROM budget");
         transactionRepository.deleteAll();
         snapshotRepository.deleteAll();
         jdbcTemplate.update("UPDATE transaction_category SET parent_id = NULL");
