@@ -19,6 +19,19 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
 
     Optional<FinancialTransaction> findByIdAndOwnerId(UUID id, UUID ownerId);
 
+    List<FinancialTransaction> findAllByTransferIdAndOwnerIdOrderByType(UUID transferId, UUID ownerId);
+
+    @Query("""
+            select entry from FinancialTransaction entry
+            where entry.ownerId = :ownerId and entry.transferId is not null
+              and (:deleted is null or
+                   (:deleted = false and entry.deletedAt is null) or
+                   (:deleted = true and entry.deletedAt is not null))
+            order by entry.transactionDate desc, entry.createdAt desc, entry.type
+            """)
+    List<FinancialTransaction> findTransferLegs(@Param("ownerId") UUID ownerId,
+                                                @Param("deleted") Boolean deleted);
+
     @Query("""
             select account.currency as currency,
                    sum(case when entry.type = :incomeType then entry.amount else 0 end) as income,
@@ -29,6 +42,7 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
               and account.ownerId = entry.ownerId
               and entry.ownerId = :ownerId
               and entry.deletedAt is null
+              and entry.type in (:incomeType, :expenseType)
               and (:fromDate is null or entry.transactionDate >= :fromDate)
               and (:toDate is null or entry.transactionDate <= :toDate)
             group by account.currency

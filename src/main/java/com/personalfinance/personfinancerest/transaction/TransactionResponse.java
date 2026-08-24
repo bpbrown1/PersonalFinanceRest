@@ -10,6 +10,7 @@ public record TransactionResponse(
         UUID ownerId,
         UUID accountId,
         UUID categoryId,
+        UUID transferId,
         BigDecimal amount,
         BigDecimal balanceImpact,
         TransactionType type,
@@ -26,7 +27,7 @@ public record TransactionResponse(
     static TransactionResponse from(FinancialTransaction transaction) {
         return new TransactionResponse(
                 transaction.getId(), transaction.getOwnerId(), transaction.getAccountId(),
-                transaction.getCategoryId(), transaction.getAmount(), transaction.balanceImpact(),
+                transaction.getCategoryId(), transaction.getTransferId(), transaction.getAmount(), transaction.balanceImpact(),
                 transaction.getType(), transaction.getTransactionDate(), transaction.getDescription(),
                 transaction.getMerchantPayee(), transaction.getNotes(), transaction.getExternalReference(),
                 transaction.getStatus(), transaction.getDeletedAt(), transaction.getCreatedAt(),

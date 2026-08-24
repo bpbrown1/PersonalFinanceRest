@@ -15,6 +15,7 @@ import com.personalfinance.personfinancerest.transaction.InvalidTransactionDateR
 import com.personalfinance.personfinancerest.transaction.InvalidTransactionStatusException;
 import com.personalfinance.personfinancerest.transaction.TransactionConflictException;
 import com.personalfinance.personfinancerest.transaction.TransactionNotFoundException;
+import com.personalfinance.personfinancerest.transaction.TransferNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -135,8 +136,8 @@ class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
 
-    @ExceptionHandler(TransactionNotFoundException.class)
-    ResponseEntity<ApiError> handleTransactionNotFound(TransactionNotFoundException exception) {
+    @ExceptionHandler({TransactionNotFoundException.class, TransferNotFoundException.class})
+    ResponseEntity<ApiError> handleTransactionNotFound(RuntimeException exception) {
         ApiError response = new ApiError(
                 Instant.now(), HttpStatus.NOT_FOUND.value(), exception.getMessage(), Map.of()
         );
