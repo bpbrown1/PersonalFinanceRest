@@ -149,4 +149,8 @@ public class FinancialAccount {
     public void recordCurrentBalance(BigDecimal currentBalance) {
         this.currentBalance = currentBalance;
     }
+
+    public void applyBalanceDelta(BigDecimal delta) {
+        currentBalance = currentBalance.add(delta);
+    }
 }

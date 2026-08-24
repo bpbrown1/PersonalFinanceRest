@@ -11,6 +11,10 @@ import com.personalfinance.personfinancerest.category.CategoryNotFoundException;
 import com.personalfinance.personfinancerest.category.CategoryHierarchyConflictException;
 import com.personalfinance.personfinancerest.category.DuplicateCategoryNameException;
 import com.personalfinance.personfinancerest.category.InvalidCategoryStatusException;
+import com.personalfinance.personfinancerest.transaction.InvalidTransactionDateRangeException;
+import com.personalfinance.personfinancerest.transaction.InvalidTransactionStatusException;
+import com.personalfinance.personfinancerest.transaction.TransactionConflictException;
+import com.personalfinance.personfinancerest.transaction.TransactionNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -81,6 +85,14 @@ class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
 
+    @ExceptionHandler(TransactionConflictException.class)
+    ResponseEntity<ApiError> handleTransactionConflict(TransactionConflictException exception) {
+        ApiError response = new ApiError(
+                Instant.now(), HttpStatus.CONFLICT.value(), exception.getMessage(), Map.of()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
     @ExceptionHandler(InvalidAccountStatusException.class)
     ResponseEntity<ApiError> handleInvalidAccountStatus(InvalidAccountStatusException exception) {
         return badRequest("Validation failed", Map.of("status", exception.getMessage()));
@@ -89,6 +101,16 @@ class ApiExceptionHandler {
     @ExceptionHandler(InvalidCategoryStatusException.class)
     ResponseEntity<ApiError> handleInvalidCategoryStatus(InvalidCategoryStatusException exception) {
         return badRequest("Validation failed", Map.of("status", exception.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidTransactionStatusException.class)
+    ResponseEntity<ApiError> handleInvalidTransactionStatus(InvalidTransactionStatusException exception) {
+        return badRequest("Validation failed", Map.of("status", exception.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidTransactionDateRangeException.class)
+    ResponseEntity<ApiError> handleInvalidTransactionDateRange(InvalidTransactionDateRangeException exception) {
+        return badRequest("Validation failed", Map.of("dateRange", exception.getMessage()));
     }
 
     @ExceptionHandler(FinancialAccountNotFoundException.class)
@@ -109,6 +131,14 @@ class ApiExceptionHandler {
                 HttpStatus.NOT_FOUND.value(),
                 exception.getMessage(),
                 Map.of()
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+    }
+
+    @ExceptionHandler(TransactionNotFoundException.class)
+    ResponseEntity<ApiError> handleTransactionNotFound(TransactionNotFoundException exception) {
+        ApiError response = new ApiError(
+                Instant.now(), HttpStatus.NOT_FOUND.value(), exception.getMessage(), Map.of()
         );
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }

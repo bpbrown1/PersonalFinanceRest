@@ -12,6 +12,18 @@ The API runs at `http://localhost:8080` by default. All public application endpo
 
 Run unit tests with `./mvnw test`. Run unit and integration tests with `./mvnw verify`.
 
+### Development sample data
+
+Activate the `dev` Spring profile to start the in-memory H2 database with representative sample data:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
+```
+
+The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, and active and recoverably deleted transactions. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
+
+Production migrations remain in `db/migration`; sample data must stay under `dev/db/migration`. When a feature adds required tables, relationships, or useful frontend states, update the development seed and `DevelopmentDataIT` together. The fixed seed UUIDs should remain stable unless a relationship is intentionally replaced.
+
 The REST API permits browser requests from `http://localhost:4200` by default for local Angular development. Override the exact, comma-separated origins without changing code:
 
 ```bash
@@ -64,7 +76,7 @@ A successful request returns `201 Created`, a `Location` header, and the created
 - `GET /api/v1/accounts?status=all` returns active and archived accounts.
 - `GET /api/v1/accounts/{accountId}` returns one account owned by the current user.
 
-`currentBalance` initially equals `openingBalance`. The response field remains stable when transaction activity later becomes part of the calculation.
+`currentBalance` initially equals `openingBalance` and changes by the signed impact of active transactions.
 
 ### Preserve balance history
 
@@ -135,6 +147,56 @@ Active category names are unique per owner after trimming, collapsing repeated w
 
 Categories may form an owner-scoped hierarchy. Every category response includes nullable `parentId`, and create requests may supply one. Self-parenting and indirect cycles return `409 Conflict`. Active categories can only use active parents; archiving a parent with active children or restoring a child beneath an archived parent also returns `409`. Archived relationships remain stored so future reports can aggregate historical activity under a parent consistently.
 
+## Transaction contract
+
+Record income or spending with `POST /api/v1/transactions`:
+
+```json
+{
+  "accountId": "0dfae49e-6765-4f9f-b485-53d17338a106",
+  "amount": 42.50,
+  "transactionDate": "2026-08-23",
+  "description": "Groceries",
+  "type": "expense",
+  "categoryId": null,
+  "merchantPayee": "Neighborhood Market",
+  "notes": null,
+  "externalReference": null
+}
+```
+
+`amount` is always a positive magnitude. Supported types are `income` and `expense`; the response's `balanceImpact` is positive for income and negative for expense. Creating, replacing, deleting, restoring, or moving an active transaction updates the affected account balances by the net change.
+
+- `GET /api/v1/transactions` returns active owned transactions, newest transaction date first.
+- `GET /api/v1/transactions?status=deleted` returns soft-deleted transactions.
+- `GET /api/v1/transactions?status=all` returns both lifecycle states.
+- `GET /api/v1/transactions/{transactionId}` retrieves one owned transaction.
+- `PUT /api/v1/transactions/{transactionId}` fully replaces its editable fields; nullable optional fields can therefore be cleared.
+- `DELETE /api/v1/transactions/{transactionId}` soft-deletes it idempotently and reverses its balance impact.
+- `POST /api/v1/transactions/{transactionId}/restore` restores it idempotently and reapplies its balance impact.
+
+Transactions require an active owned account, cannot predate that account's opening date or be future-dated, and may reference an active owned category compatible with their type. A retained archived category remains available to its existing transaction, preserving history. Even deleted transactions count as account activity, so currency and opening terms remain protected.
+
+Retrieve active transaction totals grouped by account currency with:
+
+`GET /api/v1/transactions/summary?from=2026-08-01&to=2026-08-31`
+
+```json
+[
+  {
+    "currency": "USD",
+    "income": 2416.00,
+    "spending": 24.36,
+    "netImpact": 2391.64,
+    "transactionCount": 2
+  }
+]
+```
+
+`income` and `spending` are positive fixed-decimal totals, and `netImpact` is income minus spending. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Only active transactions owned by the current user are included. Results are ordered by currency, and a range with no activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error. US-008 will add the same account, category, and type filters to both summaries and paginated ledger retrieval.
+
+Balance snapshots and transaction-driven balance changes currently share the account's `currentBalance` projection. A newly effective snapshot sets the observed balance; subsequent transaction changes apply deltas. Full automatic reconciliation between the ledger and observed snapshots is intentionally deferred to the dedicated reconciliation story.
+
 ## Error contract
 
 All documented API errors use this shape:
@@ -156,6 +218,7 @@ All documented API errors use this shape:
 - Attempts to change currency or opening terms after financial activity exists return `409` with an empty `fieldErrors` object.
 - Duplicate active category names, including restore collisions, return `409`.
 - Duplicate balance timestamps and attempts to record balances on archived accounts return `409`.
+- Archived accounts, incompatible or archived category assignments, and invalid transaction dates return `409`.
 - An as-of request before the first recorded balance returns `404`.
 
 Clients should use `status` and `fieldErrors` for behavior rather than parsing the human-readable `error` text.

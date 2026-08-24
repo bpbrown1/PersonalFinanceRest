@@ -47,6 +47,7 @@ class TransactionCategoryApiIT {
 
     @BeforeEach
     void clearCategories() {
+        jdbcTemplate.update("DELETE FROM financial_transaction");
         jdbcTemplate.update("UPDATE transaction_category SET parent_id = NULL");
         jdbcTemplate.update("DELETE FROM transaction_category");
         jdbcTemplate.update("DELETE FROM app_user WHERE id <> ?", currentUserProvider.userId());
