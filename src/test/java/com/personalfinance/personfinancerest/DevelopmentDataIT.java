@@ -71,5 +71,14 @@ class DevelopmentDataIT {
                 .andExpect(jsonPath("$[1].spending").value(173.65))
                 .andExpect(jsonPath("$[1].netImpact").value(3044.60))
                 .andExpect(jsonPath("$[1].transactionCount").value(4));
+
+        mockMvc.perform(get("/api/v1/budgets").queryParam("status", "all"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].name").value("August Spending Plan"))
+                .andExpect(jsonPath("$[0].currency").value("USD"))
+                .andExpect(jsonPath("$[0].totalPlanned").value(800.0))
+                .andExpect(jsonPath("$[0].lines.length()").value(3))
+                .andExpect(jsonPath("$[0].lines[2].status").value("archived"));
     }
 }
