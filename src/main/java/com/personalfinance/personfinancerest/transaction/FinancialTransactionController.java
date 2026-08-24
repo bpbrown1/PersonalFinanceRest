@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -34,16 +35,36 @@ class FinancialTransactionController {
     }
 
     @GetMapping
-    List<TransactionResponse> findAll(@RequestParam(defaultValue = "active") String status) {
-        return service.findAll(TransactionStatusFilter.fromValue(status));
+    TransactionPageResponse findAll(
+            @RequestParam(defaultValue = "active") String status,
+            @RequestParam(required = false) UUID accountId,
+            @RequestParam(required = false) LocalDate from,
+            @RequestParam(required = false) LocalDate to,
+            @RequestParam(required = false) UUID categoryId,
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) BigDecimal minAmount,
+            @RequestParam(required = false) BigDecimal maxAmount,
+            @RequestParam(required = false) String text,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(defaultValue = "date") String sort,
+            @RequestParam(defaultValue = "desc") String direction
+    ) {
+        return service.search(TransactionSearchCriteria.from(
+                status, accountId, from, to, categoryId, type, minAmount, maxAmount,
+                text, page, size, sort, direction
+        ));
     }
 
     @GetMapping("/summary")
     List<TransactionSummaryResponse> summarize(
             @RequestParam(required = false) LocalDate from,
-            @RequestParam(required = false) LocalDate to
+            @RequestParam(required = false) LocalDate to,
+            @RequestParam(required = false) UUID accountId,
+            @RequestParam(required = false) UUID categoryId,
+            @RequestParam(required = false) String type
     ) {
-        return service.summarize(from, to);
+        return service.summarize(from, to, accountId, categoryId, type);
     }
 
     @GetMapping("/{transactionId}")

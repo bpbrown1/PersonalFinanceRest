@@ -34,7 +34,19 @@ class DevelopmentDataIT {
 
         mockMvc.perform(get("/api/v1/transactions").queryParam("status", "all"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(10));
+                .andExpect(jsonPath("$.items.length()").value(10))
+                .andExpect(jsonPath("$.totalElements").value(10));
+
+        mockMvc.perform(get("/api/v1/transactions")
+                        .queryParam("type", "transfer_in")
+                        .queryParam("sort", "amount")
+                        .queryParam("direction", "asc")
+                        .queryParam("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].amount").value(92.0))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(2));
 
         mockMvc.perform(get("/api/v1/transfers"))
                 .andExpect(status().isOk())

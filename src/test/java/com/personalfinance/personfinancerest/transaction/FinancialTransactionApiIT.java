@@ -114,8 +114,8 @@ class FinancialTransactionApiIT {
 
         mockMvc.perform(get("/api/v1/transactions"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].amount").value(15.25))
-                .andExpect(jsonPath("$[0].balanceImpact").value(-15.25));
+                .andExpect(jsonPath("$.items[0].amount").value(15.25))
+                .andExpect(jsonPath("$.items[0].balanceImpact").value(-15.25));
         assertBalance(accountId, "84.75");
     }
 
@@ -207,6 +207,129 @@ class FinancialTransactionApiIT {
     }
 
     @Test
+    void combinesAccountDateCategoryTypeAmountAndTextFilters() throws Exception {
+        UUID checkingId = createAccount("Checking", "100.00");
+        UUID cashId = createAccount("Cash", "50.00");
+        UUID diningId = createCategory("Dining", "expense");
+        createTransaction(new Payload(
+                checkingId, "30.00", TODAY.minusDays(3), "Team dinner", "expense",
+                diningId, "Cafe", "Project celebration", "meal-30"
+        ));
+        createTransaction(new Payload(
+                checkingId, "15.00", TODAY.minusDays(2), "Quick lunch", "expense",
+                diningId, "Deli", null, "meal-15"
+        ));
+        createTransaction(new Payload(
+                cashId, "25.00", TODAY.minusDays(1), "Cash refund", "income",
+                null, null, null, "refund-25"
+        ));
+
+        mockMvc.perform(get("/api/v1/transactions")
+                        .queryParam("accountId", checkingId.toString())
+                        .queryParam("from", TODAY.minusDays(3).toString())
+                        .queryParam("to", TODAY.minusDays(2).toString())
+                        .queryParam("categoryId", diningId.toString())
+                        .queryParam("type", "expense")
+                        .queryParam("minAmount", "20.00")
+                        .queryParam("maxAmount", "30.00")
+                        .queryParam("text", "CELEBRATION"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].description").value("Team dinner"))
+                .andExpect(jsonPath("$.items[0].amount").value(30.0))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(25))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.sortBy").value("date"))
+                .andExpect(jsonPath("$.sortDirection").value("desc"));
+    }
+
+    @Test
+    void paginatesAndSortsByAmountOrDateWithStableMetadata() throws Exception {
+        UUID accountId = createAccount("Checking", "100.00");
+        createTransaction(new Payload(accountId, "30.00", TODAY.minusDays(3), "Thirty", "expense",
+                null, null, null, null));
+        createTransaction(new Payload(accountId, "10.00", TODAY.minusDays(1), "Ten", "expense",
+                null, null, null, null));
+        createTransaction(new Payload(accountId, "20.00", TODAY.minusDays(2), "Twenty", "expense",
+                null, null, null, null));
+
+        mockMvc.perform(get("/api/v1/transactions")
+                        .queryParam("page", "1")
+                        .queryParam("size", "1")
+                        .queryParam("sort", "amount")
+                        .queryParam("direction", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].amount").value(20.0))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalPages").value(3))
+                .andExpect(jsonPath("$.sortBy").value("amount"))
+                .andExpect(jsonPath("$.sortDirection").value("asc"));
+
+        mockMvc.perform(get("/api/v1/transactions")
+                        .queryParam("sort", "date")
+                        .queryParam("direction", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].description").value("Thirty"));
+    }
+
+    @Test
+    void validatesSearchRangesPagingSortingTypesAndMalformedValues() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions")
+                        .queryParam("from", TODAY.toString())
+                        .queryParam("to", TODAY.minusDays(1).toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.dateRange").exists());
+        mockMvc.perform(get("/api/v1/transactions")
+                        .queryParam("minAmount", "20.00").queryParam("maxAmount", "10.00"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.amountRange").exists());
+        mockMvc.perform(get("/api/v1/transactions").queryParam("page", "-1"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors.page").exists());
+        mockMvc.perform(get("/api/v1/transactions").queryParam("size", "101"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors.size").exists());
+        mockMvc.perform(get("/api/v1/transactions").queryParam("sort", "description"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors.sort").exists());
+        mockMvc.perform(get("/api/v1/transactions").queryParam("direction", "sideways"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors.sort").exists());
+        mockMvc.perform(get("/api/v1/transactions").queryParam("type", "refund"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors.type").exists());
+        mockMvc.perform(get("/api/v1/transactions").queryParam("accountId", "not-a-uuid"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors.accountId").exists());
+        mockMvc.perform(get("/api/v1/transactions").queryParam("minAmount", "not-a-number"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors.minAmount").exists());
+    }
+
+    @Test
+    void appliesAccountCategoryAndTypeFiltersToSummaries() throws Exception {
+        UUID checkingId = createAccount("Checking", "100.00");
+        UUID savingsId = createAccount("Savings", "100.00");
+        UUID salaryId = createCategory("Salary", "income");
+        UUID diningId = createCategory("Dining", "expense");
+        createTransaction(new Payload(checkingId, "100.00", TODAY, "Pay", "income",
+                salaryId, null, null, null));
+        createTransaction(new Payload(checkingId, "20.00", TODAY, "Dinner", "expense",
+                diningId, null, null, null));
+        createTransaction(new Payload(savingsId, "5.00", TODAY, "Interest", "income",
+                salaryId, null, null, null));
+
+        mockMvc.perform(get("/api/v1/transactions/summary")
+                        .queryParam("accountId", checkingId.toString())
+                        .queryParam("categoryId", salaryId.toString())
+                        .queryParam("type", "income"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].income").value(100.0))
+                .andExpect(jsonPath("$[0].spending").value(0.0))
+                .andExpect(jsonPath("$[0].transactionCount").value(1));
+
+        mockMvc.perform(get("/api/v1/transactions/summary").queryParam("type", "transfer_out"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
     void validatesRequiredFieldsMagnitudeAndTransactionType() throws Exception {
         mockMvc.perform(post("/api/v1/transactions")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -288,11 +411,11 @@ class FinancialTransactionApiIT {
         assertBalance(accountId, "100.00");
 
         mockMvc.perform(get("/api/v1/transactions"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(0));
         mockMvc.perform(get("/api/v1/transactions").queryParam("status", "deleted"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1));
         mockMvc.perform(get("/api/v1/transactions").queryParam("status", "all"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1));
         mockMvc.perform(get("/api/v1/transactions").queryParam("status", "archived"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors.status").exists());
 
@@ -351,7 +474,7 @@ class FinancialTransactionApiIT {
         ));
 
         mockMvc.perform(get("/api/v1/transactions").queryParam("status", "all"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(0));
         mockMvc.perform(get("/api/v1/transactions/{transactionId}", otherTransaction.getId()))
                 .andExpect(status().isNotFound());
         mockMvc.perform(put("/api/v1/transactions/{transactionId}", otherTransaction.getId())

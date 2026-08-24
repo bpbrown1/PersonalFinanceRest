@@ -13,6 +13,7 @@ import com.personalfinance.personfinancerest.category.DuplicateCategoryNameExcep
 import com.personalfinance.personfinancerest.category.InvalidCategoryStatusException;
 import com.personalfinance.personfinancerest.transaction.InvalidTransactionDateRangeException;
 import com.personalfinance.personfinancerest.transaction.InvalidTransactionStatusException;
+import com.personalfinance.personfinancerest.transaction.InvalidTransactionSearchException;
 import com.personalfinance.personfinancerest.transaction.TransactionConflictException;
 import com.personalfinance.personfinancerest.transaction.TransactionNotFoundException;
 import com.personalfinance.personfinancerest.transaction.TransferNotFoundException;
@@ -112,6 +113,11 @@ class ApiExceptionHandler {
     @ExceptionHandler(InvalidTransactionDateRangeException.class)
     ResponseEntity<ApiError> handleInvalidTransactionDateRange(InvalidTransactionDateRangeException exception) {
         return badRequest("Validation failed", Map.of("dateRange", exception.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidTransactionSearchException.class)
+    ResponseEntity<ApiError> handleInvalidTransactionSearch(InvalidTransactionSearchException exception) {
+        return badRequest("Validation failed", Map.of(exception.getField(), exception.getMessage()));
     }
 
     @ExceptionHandler(FinancialAccountNotFoundException.class)

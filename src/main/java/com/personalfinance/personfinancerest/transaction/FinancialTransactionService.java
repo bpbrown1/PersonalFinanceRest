@@ -12,6 +12,8 @@ import com.personalfinance.personfinancerest.category.TransactionCategoryReposit
 import com.personalfinance.personfinancerest.shared.money.MoneyValues;
 import com.personalfinance.personfinancerest.user.CurrentUserProvider;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -66,16 +68,13 @@ class FinancialTransactionService {
     }
 
     @Transactional(readOnly = true)
-    List<TransactionResponse> findAll(TransactionStatusFilter status) {
+    TransactionPageResponse search(TransactionSearchCriteria criteria) {
         UUID ownerId = currentUserProvider.userId();
-        List<FinancialTransaction> transactions = switch (status) {
-            case ACTIVE -> repository
-                    .findAllByOwnerIdAndDeletedAtIsNullOrderByTransactionDateDescCreatedAtDesc(ownerId);
-            case DELETED -> repository
-                    .findAllByOwnerIdAndDeletedAtIsNotNullOrderByTransactionDateDescCreatedAtDesc(ownerId);
-            case ALL -> repository.findAllByOwnerIdOrderByTransactionDateDescCreatedAtDesc(ownerId);
-        };
-        return transactions.stream().map(TransactionResponse::from).toList();
+        Page<FinancialTransaction> result = repository.findAll(
+                FinancialTransactionSpecifications.matching(ownerId, criteria),
+                PageRequest.of(criteria.page(), criteria.size(), criteria.pageableSort())
+        );
+        return TransactionPageResponse.from(result, criteria);
     }
 
     @Transactional(readOnly = true)
@@ -85,12 +84,17 @@ class FinancialTransactionService {
 
     @Transactional(readOnly = true)
     List<TransactionSummaryResponse> summarize(LocalDate from, LocalDate to) {
-        if (from != null && to != null && from.isAfter(to)) {
-            throw new InvalidTransactionDateRangeException();
-        }
+        return summarize(from, to, null, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    List<TransactionSummaryResponse> summarize(LocalDate from, LocalDate to, UUID accountId,
+                                               UUID categoryId, String type) {
+        TransactionSearchCriteria.validateRanges(from, to, null, null);
         return repository.summarize(
                         currentUserProvider.userId(), from, to,
-                        TransactionType.INCOME, TransactionType.EXPENSE
+                        TransactionType.INCOME, TransactionType.EXPENSE,
+                        accountId, categoryId, TransactionSearchCriteria.parseType(type)
                 ).stream()
                 .map(TransactionSummaryResponse::from)
                 .toList();
