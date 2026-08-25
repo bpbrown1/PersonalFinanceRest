@@ -20,9 +20,11 @@ import java.util.UUID;
 class BudgetController {
 
     private final BudgetService service;
+    private final BudgetProgressService progressService;
 
-    BudgetController(BudgetService service) {
+    BudgetController(BudgetService service, BudgetProgressService progressService) {
         this.service = service;
+        this.progressService = progressService;
     }
 
     @PostMapping
@@ -39,6 +41,13 @@ class BudgetController {
     @GetMapping("/{budgetId}")
     BudgetResponse findById(@PathVariable UUID budgetId) {
         return service.findById(budgetId);
+    }
+
+    @GetMapping("/{budgetId}/progress")
+    BudgetProgressResponse progress(@PathVariable UUID budgetId,
+                                    @RequestParam(required = false) UUID accountId,
+                                    @RequestParam(required = false) UUID categoryId) {
+        return progressService.calculate(budgetId, accountId, categoryId);
     }
 
     @PutMapping("/{budgetId}")

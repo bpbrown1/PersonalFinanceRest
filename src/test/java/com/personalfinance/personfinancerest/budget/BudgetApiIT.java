@@ -52,10 +52,14 @@ class BudgetApiIT {
 
     @BeforeEach
     void clearBudgets() {
+        jdbcTemplate.update("DELETE FROM transaction_split");
+        jdbcTemplate.update("DELETE FROM financial_transaction");
         jdbcTemplate.update("DELETE FROM budget_line");
         jdbcTemplate.update("DELETE FROM budget");
         jdbcTemplate.update("UPDATE transaction_category SET parent_id = NULL");
         categoryRepository.deleteAll();
+        jdbcTemplate.update("DELETE FROM account_balance_snapshot");
+        jdbcTemplate.update("DELETE FROM financial_account");
         jdbcTemplate.update("DELETE FROM app_user WHERE id <> ?", currentUserProvider.userId());
     }
 

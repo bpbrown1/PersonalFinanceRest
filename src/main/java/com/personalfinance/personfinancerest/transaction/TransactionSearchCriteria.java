@@ -72,11 +72,9 @@ record TransactionSearchCriteria(
         if (from != null && to != null && from.isAfter(to)) {
             throw new InvalidTransactionDateRangeException();
         }
-        if ((minAmount != null && minAmount.signum() < 0)
-                || (maxAmount != null && maxAmount.signum() < 0)
-                || (minAmount != null && maxAmount != null && minAmount.compareTo(maxAmount) > 0)) {
+        if (minAmount != null && maxAmount != null && minAmount.compareTo(maxAmount) > 0) {
             throw new InvalidTransactionSearchException(
-                    "amountRange", "minAmount must be non-negative and on or below maxAmount"
+                    "amountRange", "minAmount must be on or below maxAmount"
             );
         }
     }

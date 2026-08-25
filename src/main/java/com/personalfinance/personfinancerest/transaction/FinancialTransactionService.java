@@ -57,7 +57,7 @@ class FinancialTransactionService {
         FinancialAccount account = lockOwnedAccounts(ownerId, Set.of(request.accountId())).get(request.accountId());
         ensureActiveAccount(account);
         validateDate(request.transactionDate(), account);
-        BigDecimal amount = MoneyValues.amountOrZero(request.amount());
+        BigDecimal amount = transactionAmount(request.amount(), request.type());
         List<FinancialTransaction.SplitReplacement> splits = validateAllocation(
                 null, request.categoryId(), request.splits(), ownerId, request.type(), amount, true
         );
@@ -126,7 +126,7 @@ class FinancialTransactionService {
         }
         validateDate(request.transactionDate(), newAccount);
 
-        BigDecimal amount = MoneyValues.amountOrZero(request.amount());
+        BigDecimal amount = transactionAmount(request.amount(), request.type());
         List<FinancialTransaction.SplitReplacement> splits = validateAllocation(
                 transaction, request.categoryId(), request.splits(), ownerId, request.type(), amount, false
         );
@@ -322,8 +322,9 @@ class FinancialTransactionService {
                 try {
                     amount = MoneyValues.amountOrZero(split.amount());
                     allocatedTotal = allocatedTotal.add(amount);
-                    if (amount.signum() <= 0) {
-                        errors.put(fieldPrefix + ".amount", "Split amount must be positive");
+                    if (amount.signum() == 0 || amount.signum() != transactionAmount.signum()) {
+                        errors.put(fieldPrefix + ".amount",
+                                "Split amount must be non-zero and use the transaction amount's sign");
                     }
                 } catch (ArithmeticException exception) {
                     errors.put(fieldPrefix + ".amount", "Amount must use at most two decimal places");
@@ -363,5 +364,18 @@ class FinancialTransactionService {
             throw new InvalidTransactionAllocationException(errors);
         }
         return List.copyOf(replacements);
+    }
+
+    private BigDecimal transactionAmount(BigDecimal value, TransactionType type) {
+        BigDecimal amount = MoneyValues.amountOrZero(value);
+        if (amount.signum() == 0) {
+            throw new InvalidTransactionAllocationException(Map.of("amount", "Amount must be non-zero"));
+        }
+        if (type != TransactionType.EXPENSE && amount.signum() < 0) {
+            throw new InvalidTransactionAllocationException(Map.of(
+                    "amount", "Only expense transactions may use a negative amount for a refund or credit"
+            ));
+        }
+        return amount;
     }
 }

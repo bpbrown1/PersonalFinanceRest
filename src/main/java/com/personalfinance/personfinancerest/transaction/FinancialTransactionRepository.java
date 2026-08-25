@@ -61,5 +61,30 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
             @Param("transactionType") TransactionType transactionType
     );
 
+    @Query("""
+            select distinct entry from FinancialTransaction entry
+            left join fetch entry.splits
+            where entry.ownerId = :ownerId
+              and entry.deletedAt is null
+              and entry.type = :expenseType
+              and entry.transactionDate >= :fromDate
+              and entry.transactionDate <= :toDate
+              and entry.accountId in (
+                  select account.id from FinancialAccount account
+                  where account.ownerId = :ownerId
+                    and account.currency = :currency
+                    and (:accountId is null or account.id = :accountId)
+              )
+            order by entry.transactionDate, entry.createdAt, entry.id
+            """)
+    List<FinancialTransaction> findBudgetExpenses(
+            @Param("ownerId") UUID ownerId,
+            @Param("currency") String currency,
+            @Param("fromDate") LocalDate from,
+            @Param("toDate") LocalDate to,
+            @Param("accountId") UUID accountId,
+            @Param("expenseType") TransactionType expenseType
+    );
+
     boolean existsByAccountId(UUID accountId);
 }

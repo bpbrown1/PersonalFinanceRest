@@ -104,7 +104,17 @@ MERGE INTO financial_transaction (
      19.99, 'EXPENSE', DATEADD('DAY', -8, CURRENT_DATE), 'Deleted legacy fee',
      'Old Provider', 'Retained to exercise restore workflows', NULL,
      DATEADD('DAY', -7, CURRENT_TIMESTAMP), DATEADD('DAY', -8, CURRENT_TIMESTAMP),
-     DATEADD('DAY', -7, CURRENT_TIMESTAMP));
+     DATEADD('DAY', -7, CURRENT_TIMESTAMP)),
+    ('40000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001',
+     '10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000005',
+     -20.00, 'EXPENSE', DATE '2026-08-20', 'Grocery refund',
+     'Neighborhood Market', 'Negative expense reduces budget spending', 'DEV-REFUND-001', NULL,
+     DATE '2026-08-20', DATE '2026-08-20'),
+    ('40000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-000000000001',
+     '10000000-0000-0000-0000-000000000001', NULL,
+     35.00, 'EXPENSE', DATE '2026-08-21', 'Unbudgeted purchase',
+     'Corner Store', 'Exercises unbudgeted progress', 'DEV-UNBUDGETED-001', NULL,
+     DATE '2026-08-21', DATE '2026-08-21');
 
 MERGE INTO financial_transaction (
     id, owner_id, account_id, category_id, transfer_id, amount, type, transaction_date, description,

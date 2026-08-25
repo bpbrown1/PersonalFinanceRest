@@ -34,10 +34,10 @@ class DevelopmentDataIT {
 
         mockMvc.perform(get("/api/v1/transactions").queryParam("status", "all"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items.length()").value(10))
+                .andExpect(jsonPath("$.items.length()").value(12))
                 .andExpect(jsonPath("$.items[?(@.description == 'Weekly groceries')].splits[0].amount")
                         .value(org.hamcrest.Matchers.contains(100.0)))
-                .andExpect(jsonPath("$.totalElements").value(10));
+                .andExpect(jsonPath("$.totalElements").value(12));
 
         mockMvc.perform(get("/api/v1/transactions")
                         .queryParam("type", "transfer_in")
@@ -68,9 +68,9 @@ class DevelopmentDataIT {
                 .andExpect(jsonPath("$[0].transactionCount").value(1))
                 .andExpect(jsonPath("$[1].currency").value("USD"))
                 .andExpect(jsonPath("$[1].income").value(3218.25))
-                .andExpect(jsonPath("$[1].spending").value(173.65))
-                .andExpect(jsonPath("$[1].netImpact").value(3044.60))
-                .andExpect(jsonPath("$[1].transactionCount").value(4));
+                .andExpect(jsonPath("$[1].spending").value(188.65))
+                .andExpect(jsonPath("$[1].netImpact").value(3029.60))
+                .andExpect(jsonPath("$[1].transactionCount").value(6));
 
         mockMvc.perform(get("/api/v1/budgets").queryParam("status", "all"))
                 .andExpect(status().isOk())
@@ -80,5 +80,12 @@ class DevelopmentDataIT {
                 .andExpect(jsonPath("$[0].totalPlanned").value(800.0))
                 .andExpect(jsonPath("$[0].lines.length()").value(3))
                 .andExpect(jsonPath("$[0].lines[2].status").value("archived"));
+
+        mockMvc.perform(get("/api/v1/budgets/70000000-0000-0000-0000-000000000001/progress"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.planned").value(800.0))
+                .andExpect(jsonPath("$.budgetedActual").value(153.65))
+                .andExpect(jsonPath("$.unbudgetedActual").value(35.0))
+                .andExpect(jsonPath("$.totalActual").value(188.65));
     }
 }
