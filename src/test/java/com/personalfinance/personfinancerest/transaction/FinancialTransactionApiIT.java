@@ -125,6 +125,39 @@ class FinancialTransactionApiIT {
     }
 
     @Test
+    void recordsExpenseRefundsWithNegativeAmountsAndConsistentlySignedSplits() throws Exception {
+        UUID accountId = createAccount("Checking", "100.00");
+        UUID groceriesId = createCategory("Groceries", "expense");
+        UUID diningId = createCategory("Dining", "expense");
+
+        mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(new Payload(accountId, "-15.00", TODAY, "Returned groceries", "expense",
+                                groceriesId, null, null, null))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.amount").value(-15.0))
+                .andExpect(jsonPath("$.balanceImpact").value(15.0));
+
+        mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(splitPayload(accountId, "-20.00", "expense", null, List.of(
+                                new SplitRow(null, groceriesId, "-8.00"),
+                                new SplitRow(null, diningId, "-12.00")
+                        )))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.splits[0].amount").value(-8.0))
+                .andExpect(jsonPath("$.balanceImpact").value(20.0));
+
+        mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(new Payload(accountId, "-1.00", TODAY, "Invalid", "income",
+                                null, null, null, null))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.amount").exists());
+        assertBalance(accountId, "135.00");
+    }
+
+    @Test
     void summarizesActiveOwnedTransactionsByAccountCurrency() throws Exception {
         UUID usdAccountId = createAccount("Checking", "USD", "100.00");
         UUID eurAccountId = createAccount("Travel", "EUR", "100.00");

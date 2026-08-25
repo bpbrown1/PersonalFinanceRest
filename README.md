@@ -165,7 +165,7 @@ Record income or spending with `POST /api/v1/transactions`:
 }
 ```
 
-`amount` is always a positive magnitude. Supported types are `income` and `expense`; the response's `balanceImpact` is positive for income and negative for expense. Creating, replacing, deleting, restoring, or moving an active transaction updates the affected account balances by the net change.
+Supported types are `income` and `expense`. Income amounts and ordinary expense amounts are positive. An expense refund or credit is recorded as a negative expense amount, which reduces spending and produces a positive `balanceImpact`; zero and negative income amounts are invalid. Creating, replacing, deleting, restoring, or moving an active transaction updates the affected account balances by the net change.
 
 - `GET /api/v1/transactions` returns the first page of active owned transactions.
 - `GET /api/v1/transactions?status=deleted` searches soft-deleted transactions.
@@ -194,7 +194,7 @@ An income or expense can use either the optional parent `categoryId` above or an
 }
 ```
 
-A split requires at least two positive rows with distinct owned, type-compatible categories. All monetary values currently use the application's fixed two-decimal currency scale, and split amounts must equal the normalized transaction amount exactly; the server never creates a remainder row. Transfers cannot be split.
+A split requires at least two non-zero rows with distinct owned, type-compatible categories. Every split must use the transaction amount's sign, so refund allocations are all negative. All monetary values use the application's fixed two-decimal currency scale, and split amounts must equal the normalized transaction amount exactly; the server never creates a remainder row. Transfers cannot be split.
 
 Create requests omit split IDs. Responses expose each row's stable `id`, zero-based `position`, `categoryId`, and `amount`. Full `PUT` requests retain IDs for unchanged rows, omit IDs for new rows, and delete rows omitted from the replacement allocation. Existing IDs cannot be moved between transactions. New or reassigned rows require active categories; an unchanged row may retain an archived category. Supplying no splits returns the transaction to the single-category contract. Soft deletion and restoration retain the allocation.
 
@@ -203,7 +203,7 @@ Allocation validation uses indexed field keys such as `splits[0].id`, `splits[0]
 Transaction search supports these combinable query parameters:
 
 - `accountId`, inclusive `from` and `to` dates, `categoryId`, and `type`.
-- Inclusive `minAmount` and `maxAmount` positive-magnitude boundaries.
+- Inclusive `minAmount` and `maxAmount` signed boundaries.
 - Case-insensitive `text` matching description, merchant/payee, notes, or external reference.
 - Zero-based `page` (default `0`) and `size` from 1 through 100 (default `25`).
 - `sort=date|amount` and `direction=asc|desc` (defaults `date,desc`).
@@ -265,7 +265,7 @@ Retrieve active transaction totals grouped by account currency with:
 ]
 ```
 
-`income` and `spending` are positive fixed-decimal totals, and `netImpact` is income minus spending. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Optional `accountId`, `categoryId`, and `type` filters match the paged ledger semantics. A category filter matches either an unsplit parent category or an individual split row; split amounts are aggregated without also counting the parent amount. `transactionCount` remains the distinct number of matching transactions. Only active income and expense transactions owned by the current user are included; transfer legs are excluded from every total and from `transactionCount`. Results are ordered by currency, and a range with no qualifying activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error.
+`income` and `spending` are fixed-decimal totals, and `netImpact` is income minus spending. Negative expense refunds reduce `spending`, which may become negative when credits exceed purchases. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Optional `accountId`, `categoryId`, and `type` filters match the paged ledger semantics. A category filter matches either an unsplit parent category or an individual split row; split amounts are aggregated without also counting the parent amount. `transactionCount` remains the distinct number of matching transactions. Only active income and expense transactions owned by the current user are included; transfer legs are excluded from every total and from `transactionCount`. Results are ordered by currency, and a range with no qualifying activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error.
 
 Balance snapshots and transaction-driven balance changes currently share the account's `currentBalance` projection. A newly effective snapshot sets the observed balance; subsequent transaction changes apply deltas. Full automatic reconciliation between the ledger and observed snapshots is intentionally deferred to the dedicated reconciliation story.
 
@@ -289,6 +289,7 @@ The dates must span one complete calendar month. Multiple owned budgets may cove
 
 - `GET /api/v1/budgets?status=active|archived|all` lists owned budgets; active is the default.
 - `GET /api/v1/budgets/{budgetId}` retrieves one owned budget.
+- `GET /api/v1/budgets/{budgetId}/progress` calculates live planned-versus-actual progress. Optional `accountId` and `categoryId` filters restrict contributing activity.
 - `PUT /api/v1/budgets/{budgetId}` fully replaces its name, currency, and monthly period.
 - `POST /api/v1/budgets/{budgetId}/archive` and `/restore` change lifecycle state idempotently.
 - `POST /api/v1/budgets/{budgetId}/lines` appends a line.
@@ -296,7 +297,58 @@ The dates must span one complete calendar month. Multiple owned budgets may cove
 - `PUT /api/v1/budgets/{budgetId}/lines/reorder` accepts every retained line ID in the desired order.
 - `POST /api/v1/budgets/{budgetId}/lines/{lineId}/archive` and `/restore` preserve line history.
 
-Budget and line IDs remain stable, and responses include lifecycle timestamps plus the budget's optimistic-lock `version`. Archived budgets are immutable until restored; active historical budgets remain correctable. There are intentionally no permanent-delete endpoints. Actual-versus-planned progress is handled separately by US-049.
+Budget and line IDs remain stable, and responses include lifecycle timestamps plus the budget's optimistic-lock `version`. Archived budgets are immutable until restored; active historical budgets remain correctable. There are intentionally no permanent-delete endpoints.
+
+An abridged progress response is shaped for both summary cards and line-item drill-down:
+
+```json
+{
+  "budgetId": "70000000-0000-0000-0000-000000000001",
+  "currency": "USD",
+  "startDate": "2026-08-01",
+  "endDate": "2026-08-31",
+  "planned": 800.00,
+  "budgetedActual": 153.65,
+  "unbudgetedActual": 35.00,
+  "totalActual": 188.65,
+  "remaining": 611.35,
+  "percentageUsed": 23.58,
+  "lines": [
+    {
+      "lineId": "71000000-0000-0000-0000-000000000001",
+      "categoryId": "30000000-0000-0000-0000-000000000001",
+      "planned": 600.00,
+      "actual": 153.65,
+      "remaining": 446.35,
+      "percentageUsed": 25.61,
+      "drillDown": {
+        "from": "2026-08-01",
+        "to": "2026-08-31",
+        "type": "expense",
+        "status": "active",
+        "transactionIds": [
+          "40000000-0000-0000-0000-000000000002",
+          "40000000-0000-0000-0000-000000000003",
+          "40000000-0000-0000-0000-000000000011"
+        ]
+      }
+    }
+  ],
+  "unbudgeted": [
+    {
+      "categoryId": null,
+      "actual": 35.00,
+      "drillDown": {
+        "transactionIds": ["40000000-0000-0000-0000-000000000012"]
+      }
+    }
+  ]
+}
+```
+
+Budget progress is recalculated from active expense transactions in the inclusive budget period and matching account currency. Positive expenses increase actual spending; negative expense refunds reduce it. Income, transfers, soft-deleted transactions, foreign owners, other currencies, and out-of-period activity are excluded. Split rows contribute their allocated amounts rather than the parent amount.
+
+Only active budget lines receive progress. A line includes its category and descendants. When parent and child lines overlap, each allocation goes to the closest matching line (then line position), preventing double counting. Unmatched and uncategorized spending is returned in separate `unbudgeted` rows. Overall fields distinguish `budgetedActual`, `unbudgetedActual`, and `totalActual`; overall remaining is planned minus total actual. Negative remaining and percentages above 100 are preserved, while a zero planned amount returns a null percentage. Every line and unbudgeted row includes stable contributing transaction IDs plus its date, account, category, type, and lifecycle drill-down filters.
 
 ## Error contract
 
