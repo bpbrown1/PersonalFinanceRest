@@ -20,7 +20,7 @@ Activate the `dev` Spring profile to start the in-memory H2 database with repres
 SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 ```
 
-The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, same-currency and cross-currency transfers, and a monthly budget with active and archived lines. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
+The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, same-currency and cross-currency transfers, and monthly budgets with active and archived lines. An archived July plan is available as a copy source; August is already occupied and September is initially free. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
 
 Production migrations remain in `db/migration`; sample data must stay under `dev/db/migration`. When a feature adds required tables, relationships, or useful frontend states, update the development seed and `DevelopmentDataIT` together. The fixed seed UUIDs should remain stable unless a relationship is intentionally replaced.
 
@@ -289,6 +289,7 @@ The dates must span one complete calendar month. Multiple owned budgets may cove
 
 - `GET /api/v1/budgets?status=active|archived|all` lists owned budgets; active is the default.
 - `GET /api/v1/budgets/{budgetId}` retrieves one owned budget.
+- `POST /api/v1/budgets/{budgetId}/copy` creates an independent copy for an unused target month.
 - `GET /api/v1/budgets/{budgetId}/progress` calculates live planned-versus-actual progress. Optional `accountId` and `categoryId` filters restrict contributing activity.
 - `GET /api/v1/budgets/{budgetId}/progress/transactions` pages through the exact transactions behind an overall, line, or unbudgeted progress total.
 - `PUT /api/v1/budgets/{budgetId}` fully replaces its name, currency, and monthly period.
@@ -299,6 +300,28 @@ The dates must span one complete calendar month. Multiple owned budgets may cove
 - `POST /api/v1/budgets/{budgetId}/lines/{lineId}/archive` and `/restore` preserve line history.
 
 Budget and line IDs remain stable, and responses include lifecycle timestamps plus the budget's optimistic-lock `version`. Archived budgets are immutable until restored; active historical budgets remain correctable. There are intentionally no permanent-delete endpoints.
+
+### Copy a budget to another month
+
+`POST /api/v1/budgets/{budgetId}/copy`
+
+```json
+{"targetMonth": "2026-09"}
+```
+
+`targetMonth` must use `YYYY-MM` with a valid month and a year from 0001 through 9999. The server derives the complete calendar period, including leap days. Success returns `201 Created`, a `Location` header, and the normal budget response.
+
+An active or archived owned budget can be a source. The copy retains its name, currency, and active lines' category IDs, exact planned amounts, and relative order. Positions are compacted to start at zero. Budget and line IDs and timestamps are new, lifecycle states are active, and version starts at zero. Archived lines are omitted. The source is not modified; subsequent edits to either budget are independent. Actual spending is not copied: progress uses the target month's own transactions.
+
+Copied lines are new associations, so all their categories must currently be owned, active, and expense-compatible. An active source line referencing an archived or income-only category rejects the whole copy with `409`; missing or foreign resources return `404`. Restore or correct the source category/line explicitly instead of silently dropping planned spending. Archived source lines are skipped before category validation.
+
+A copy is rejected if any budget already exists for this owner in the target month, including archived budgets, other currencies, and the source itself. The `409` response keeps the normal error envelope and adds `existingBudgetId` for navigation. If several existing budgets occupy the month, the earliest created (then lowest ID) is returned. Invalid month input returns `400` with a `targetMonth` field error.
+
+Create, copy, and metadata-update transactions use an owner-row database lock to coordinate month checks and writes, including concurrent copies from different sources. The check and complete copy commit atomically. This is a copy-specific precondition, not a new global uniqueness rule: ordinary create/update endpoints retain their existing multiple-budget-per-month behavior. No schema migration or automatic recurring generation is introduced.
+
+Development example: copy archived source `70000000-0000-0000-0000-000000000002` to `2026-09`, or select `2026-08` to exercise the existing-budget conflict.
+
+### Budget progress
 
 An abridged progress response is shaped for both summary cards and line-item drill-down:
 

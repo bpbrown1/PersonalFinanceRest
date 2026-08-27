@@ -15,6 +15,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,19 +29,23 @@ class BudgetService {
     private final BudgetRepository repository;
     private final TransactionCategoryRepository categoryRepository;
     private final CurrentUserProvider currentUserProvider;
+    private final BudgetWriteLock writeLock;
 
     BudgetService(BudgetRepository repository,
                   TransactionCategoryRepository categoryRepository,
-                  CurrentUserProvider currentUserProvider) {
+                  CurrentUserProvider currentUserProvider,
+                  BudgetWriteLock writeLock) {
         this.repository = repository;
         this.categoryRepository = categoryRepository;
         this.currentUserProvider = currentUserProvider;
+        this.writeLock = writeLock;
     }
 
     @Transactional
     BudgetResponse create(CreateBudgetRequest request) {
         validateMonthlyPeriod(request.startDate(), request.endDate());
         UUID ownerId = currentUserProvider.userId();
+        writeLock.acquire(ownerId);
         Budget budget = new Budget(
                 UUID.randomUUID(), ownerId, request.name(), MoneyValues.currencyCode(request.currency()),
                 request.startDate(), request.endDate()
@@ -52,6 +57,30 @@ class BudgetService {
             budget.addLine(line.categoryId(), plannedAmount(line.plannedAmount(), "lines"));
         }
         return BudgetResponse.from(save(budget));
+    }
+
+    @Transactional
+    BudgetResponse copy(UUID sourceBudgetId, CopyBudgetRequest request) {
+        UUID ownerId = currentUserProvider.userId();
+        writeLock.acquire(ownerId);
+        Budget source = findOwnedBudget(sourceBudgetId);
+        YearMonth month = request.month();
+        repository.findFirstByOwnerIdAndStartDateOrderByCreatedAtAscIdAsc(ownerId, month.atDay(1))
+                .ifPresent(existing -> {
+                    throw new BudgetTargetMonthConflictException(month, existing.getId());
+                });
+
+        Budget copy = new Budget(UUID.randomUUID(), ownerId, source.getName(), source.getCurrency(),
+                month.atDay(1), month.atEndOfMonth());
+        List<BudgetLine> activeLines = source.getLines().stream()
+                .filter(line -> line.getStatus() == BudgetStatus.ACTIVE)
+                .sorted(Comparator.comparingInt(BudgetLine::getPosition))
+                .toList();
+        for (BudgetLine line : activeLines) {
+            validateNewCategory(line.getCategoryId(), ownerId);
+            copy.addLine(line.getCategoryId(), plannedAmount(line.getPlannedAmount(), "lines"));
+        }
+        return BudgetResponse.from(save(copy));
     }
 
     @Transactional(readOnly = true)
@@ -72,6 +101,7 @@ class BudgetService {
 
     @Transactional
     BudgetResponse update(UUID budgetId, UpdateBudgetRequest request) {
+        writeLock.acquire(currentUserProvider.userId());
         Budget budget = findOwnedBudget(budgetId);
         ensureMutable(budget);
         validateMonthlyPeriod(request.startDate(), request.endDate());
