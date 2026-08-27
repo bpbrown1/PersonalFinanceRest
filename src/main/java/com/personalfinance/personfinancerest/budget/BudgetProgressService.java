@@ -9,6 +9,7 @@ import com.personalfinance.personfinancerest.category.TransactionCategoryReposit
 import com.personalfinance.personfinancerest.user.CurrentUserProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -87,7 +88,8 @@ class BudgetProgressService {
             return new BudgetLineProgressResponse(
                     line.getId(), line.getCategoryId(), line.getPosition(), planned, progress.actual,
                     planned.subtract(progress.actual), percentage(progress.actual, planned),
-                    drillDown(budget, accountId, categoryIds, progress.transactionIds)
+                    drillDown(budget, accountId, categoryIds, progress.transactionIds,
+                            "line", line.getId(), null, false)
             );
         }).toList();
 
@@ -97,7 +99,8 @@ class BudgetProgressService {
                         entry.getKey(), entry.getValue().actual,
                         drillDown(budget, accountId,
                                 entry.getKey() == null ? Set.of() : Set.of(entry.getKey()),
-                                entry.getValue().transactionIds)
+                                entry.getValue().transactionIds,
+                                "unbudgeted", null, entry.getKey(), entry.getKey() == null)
                 )).toList();
 
         BigDecimal planned = activeLines.stream().map(BudgetLine::getPlannedAmount).reduce(ZERO, BigDecimal::add);
@@ -117,7 +120,8 @@ class BudgetProgressService {
                 accountId, categoryId, planned, budgetedActual, unbudgetedActual, totalActual,
                 planned.subtract(totalActual), percentage(totalActual, planned), lines, unbudgetedRows,
                 drillDown(budget, accountId,
-                        filterCategoryIds == null ? Set.of() : filterCategoryIds, allTransactionIds)
+                        filterCategoryIds == null ? Set.of() : filterCategoryIds, allTransactionIds,
+                        "overall", null, categoryId, false)
         );
     }
 
@@ -169,12 +173,34 @@ class BudgetProgressService {
     }
 
     private BudgetProgressDrillDown drillDown(Budget budget, UUID accountId, Set<UUID> categoryIds,
-                                               Set<UUID> transactionIds) {
+                                               Set<UUID> transactionIds, String scope, UUID lineId,
+                                               UUID categoryId, boolean uncategorized) {
         return new BudgetProgressDrillDown(
                 budget.getStartDate(), budget.getEndDate(), accountId,
                 categoryIds.stream().sorted(Comparator.comparing(UUID::toString)).toList(),
-                "expense", "active", List.copyOf(transactionIds)
+                "expense", "active", List.copyOf(transactionIds),
+                transactionsPath(budget.getId(), accountId, scope, lineId, categoryId, uncategorized)
         );
+    }
+
+    private String transactionsPath(UUID budgetId, UUID accountId, String scope, UUID lineId,
+                                    UUID categoryId, boolean uncategorized) {
+        UriComponentsBuilder builder = UriComponentsBuilder
+                .fromPath("/api/v1/budgets/{budgetId}/progress/transactions")
+                .queryParam("scope", scope);
+        if (lineId != null) {
+            builder.queryParam("lineId", lineId);
+        }
+        if (accountId != null) {
+            builder.queryParam("accountId", accountId);
+        }
+        if (categoryId != null) {
+            builder.queryParam("categoryId", categoryId);
+        }
+        if (uncategorized) {
+            builder.queryParam("uncategorized", true);
+        }
+        return builder.buildAndExpand(budgetId).toUriString();
     }
 
     private BigDecimal percentage(BigDecimal actual, BigDecimal planned) {

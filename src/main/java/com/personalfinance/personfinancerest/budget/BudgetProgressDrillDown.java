@@ -11,6 +11,7 @@ public record BudgetProgressDrillDown(
         List<UUID> categoryIds,
         String type,
         String status,
-        List<UUID> transactionIds
+        List<UUID> transactionIds,
+        String transactionsPath
 ) {
 }
