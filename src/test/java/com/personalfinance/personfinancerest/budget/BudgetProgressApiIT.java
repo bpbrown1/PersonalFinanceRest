@@ -113,12 +113,59 @@ class BudgetProgressApiIT {
                 .andExpect(jsonPath("$.lines[1].remaining").value(-20.0))
                 .andExpect(jsonPath("$.lines[1].percentageUsed").value(133.33))
                 .andExpect(jsonPath("$.lines[1].drillDown.transactionIds.length()").value(4))
+                .andExpect(jsonPath("$.lines[1].drillDown.transactionsPath").value(
+                        "/api/v1/budgets/" + budgetId
+                                + "/progress/transactions?scope=line&lineId=" + childLineId))
                 .andExpect(jsonPath("$.unbudgeted.length()").value(2))
                 .andExpect(jsonPath("$.drillDown.transactionIds.length()").value(7))
+                .andExpect(jsonPath("$.drillDown.transactionsPath").value(
+                        "/api/v1/budgets/" + budgetId + "/progress/transactions?scope=overall"))
                 .andExpect(jsonPath("$.drillDown.transactionIds").value(org.hamcrest.Matchers.hasItems(
                         startParent.toString(), endChild.toString(), leafExpense.toString(), refund.toString(),
                         household.toString(), uncategorized.toString(), split.toString()
                 )));
+
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress/transactions", budgetId)
+                        .queryParam("scope", "overall")
+                        .queryParam("page", "0")
+                        .queryParam("size", "3")
+                        .queryParam("sort", "date")
+                        .queryParam("direction", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(7))
+                .andExpect(jsonPath("$.totalPages").value(3))
+                .andExpect(jsonPath("$.items.length()").value(3))
+                .andExpect(jsonPath("$.items[0].id").value(startParent.toString()))
+                .andExpect(jsonPath("$.items[1].id").value(leafExpense.toString()))
+                .andExpect(jsonPath("$.items[2].id").value(refund.toString()))
+                .andExpect(jsonPath("$.sortBy").value("date"))
+                .andExpect(jsonPath("$.sortDirection").value("asc"));
+
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress/transactions", budgetId)
+                        .queryParam("scope", "line")
+                        .queryParam("lineId", childLineId.toString())
+                        .queryParam("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(4))
+                .andExpect(jsonPath("$.items[*].id").value(org.hamcrest.Matchers.containsInAnyOrder(
+                        endChild.toString(), leafExpense.toString(), refund.toString(), split.toString()
+                )));
+
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress/transactions", budgetId)
+                        .queryParam("scope", "unbudgeted")
+                        .queryParam("categoryId", otherCategoryId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.items[*].id").value(org.hamcrest.Matchers.containsInAnyOrder(
+                        household.toString(), split.toString()
+                )));
+
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress/transactions", budgetId)
+                        .queryParam("scope", "unbudgeted")
+                        .queryParam("uncategorized", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(uncategorized.toString()));
     }
 
     @Test
@@ -152,6 +199,25 @@ class BudgetProgressApiIT {
         ));
         mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress", foreign.getId()))
                 .andExpect(status().isNotFound());
+
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress/transactions", foreign.getId()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress/transactions", budgetId)
+                        .queryParam("scope", "line"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.lineId").exists());
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress/transactions", budgetId)
+                        .queryParam("scope", "line")
+                        .queryParam("lineId", UUID.randomUUID().toString()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress/transactions", budgetId)
+                        .queryParam("scope", "unbudgeted")
+                        .queryParam("categoryId", UUID.randomUUID().toString()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress/transactions", budgetId)
+                        .queryParam("scope", "unsupported"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.scope").exists());
     }
 
     private void insertAccount(UUID id, UUID accountOwnerId, String currency) {

@@ -290,6 +290,7 @@ The dates must span one complete calendar month. Multiple owned budgets may cove
 - `GET /api/v1/budgets?status=active|archived|all` lists owned budgets; active is the default.
 - `GET /api/v1/budgets/{budgetId}` retrieves one owned budget.
 - `GET /api/v1/budgets/{budgetId}/progress` calculates live planned-versus-actual progress. Optional `accountId` and `categoryId` filters restrict contributing activity.
+- `GET /api/v1/budgets/{budgetId}/progress/transactions` pages through the exact transactions behind an overall, line, or unbudgeted progress total.
 - `PUT /api/v1/budgets/{budgetId}` fully replaces its name, currency, and monthly period.
 - `POST /api/v1/budgets/{budgetId}/archive` and `/restore` change lifecycle state idempotently.
 - `POST /api/v1/budgets/{budgetId}/lines` appends a line.
@@ -330,7 +331,8 @@ An abridged progress response is shaped for both summary cards and line-item dri
           "40000000-0000-0000-0000-000000000002",
           "40000000-0000-0000-0000-000000000003",
           "40000000-0000-0000-0000-000000000011"
-        ]
+        ],
+        "transactionsPath": "/api/v1/budgets/70000000-0000-0000-0000-000000000001/progress/transactions?scope=line&lineId=71000000-0000-0000-0000-000000000001"
       }
     }
   ],
@@ -339,7 +341,8 @@ An abridged progress response is shaped for both summary cards and line-item dri
       "categoryId": null,
       "actual": 35.00,
       "drillDown": {
-        "transactionIds": ["40000000-0000-0000-0000-000000000012"]
+        "transactionIds": ["40000000-0000-0000-0000-000000000012"],
+        "transactionsPath": "/api/v1/budgets/70000000-0000-0000-0000-000000000001/progress/transactions?scope=unbudgeted&uncategorized=true"
       }
     }
   ]
@@ -349,6 +352,15 @@ An abridged progress response is shaped for both summary cards and line-item dri
 Budget progress is recalculated from active expense transactions in the inclusive budget period and matching account currency. Positive expenses increase actual spending; negative expense refunds reduce it. Income, transfers, soft-deleted transactions, foreign owners, other currencies, and out-of-period activity are excluded. Split rows contribute their allocated amounts rather than the parent amount.
 
 Only active budget lines receive progress. A line includes its category and descendants. When parent and child lines overlap, each allocation goes to the closest matching line (then line position), preventing double counting. Unmatched and uncategorized spending is returned in separate `unbudgeted` rows. Overall fields distinguish `budgetedActual`, `unbudgetedActual`, and `totalActual`; overall remaining is planned minus total actual. Negative remaining and percentages above 100 are preserved, while a zero planned amount returns a null percentage. Every line and unbudgeted row includes stable contributing transaction IDs plus its date, account, category, type, and lifecycle drill-down filters.
+
+Each drill-down now also supplies a bookmarkable `transactionsPath`. The endpoint returns the established transaction page response and accepts `page`, `size`, `sort`, and `direction` just like transaction search. Supported scopes are:
+
+- `scope=overall`, with optional `accountId` and hierarchical `categoryId` filters.
+- `scope=line&lineId={lineId}`, with optional `accountId`.
+- `scope=unbudgeted&categoryId={categoryId}` for one unbudgeted category.
+- `scope=unbudgeted&uncategorized=true` for uncategorized spending.
+
+The server recomputes the selected scope from the owned budget instead of accepting transaction IDs from the client. It therefore preserves the same inclusive dates, currency, active-expense, hierarchy, split-allocation, refund, deletion, and most-specific-line rules as the progress total. A transaction appears once even when several matching allocations belong to it. Unknown or foreign budgets, lines, accounts, and categories return the established not-found errors; incompatible scope parameters return the standard validation response.
 
 ## Error contract
 

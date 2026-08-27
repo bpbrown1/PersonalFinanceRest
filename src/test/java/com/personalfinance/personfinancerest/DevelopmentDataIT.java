@@ -87,5 +87,16 @@ class DevelopmentDataIT {
                 .andExpect(jsonPath("$.budgetedActual").value(153.65))
                 .andExpect(jsonPath("$.unbudgetedActual").value(35.0))
                 .andExpect(jsonPath("$.totalActual").value(188.65));
+
+        mockMvc.perform(get("/api/v1/budgets/70000000-0000-0000-0000-000000000001/progress/transactions")
+                        .queryParam("scope", "overall"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(4))
+                .andExpect(jsonPath("$.items[*].id").value(org.hamcrest.Matchers.hasItems(
+                        "40000000-0000-0000-0000-000000000002",
+                        "40000000-0000-0000-0000-000000000003",
+                        "40000000-0000-0000-0000-000000000011",
+                        "40000000-0000-0000-0000-000000000012"
+                )));
     }
 }

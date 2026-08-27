@@ -1,5 +1,6 @@
 package com.personalfinance.personfinancerest.budget;
 
+import com.personalfinance.personfinancerest.transaction.TransactionPageResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,10 +22,13 @@ class BudgetController {
 
     private final BudgetService service;
     private final BudgetProgressService progressService;
+    private final BudgetProgressTransactionService progressTransactionService;
 
-    BudgetController(BudgetService service, BudgetProgressService progressService) {
+    BudgetController(BudgetService service, BudgetProgressService progressService,
+                     BudgetProgressTransactionService progressTransactionService) {
         this.service = service;
         this.progressService = progressService;
+        this.progressTransactionService = progressTransactionService;
     }
 
     @PostMapping
@@ -48,6 +52,24 @@ class BudgetController {
                                     @RequestParam(required = false) UUID accountId,
                                     @RequestParam(required = false) UUID categoryId) {
         return progressService.calculate(budgetId, accountId, categoryId);
+    }
+
+    @GetMapping("/{budgetId}/progress/transactions")
+    TransactionPageResponse progressTransactions(
+            @PathVariable UUID budgetId,
+            @RequestParam(defaultValue = "overall") String scope,
+            @RequestParam(required = false) UUID lineId,
+            @RequestParam(required = false) UUID accountId,
+            @RequestParam(required = false) UUID categoryId,
+            @RequestParam(defaultValue = "false") boolean uncategorized,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(defaultValue = "date") String sort,
+            @RequestParam(defaultValue = "desc") String direction
+    ) {
+        return progressTransactionService.findPage(budgetId, BudgetProgressTransactionQuery.from(
+                scope, lineId, accountId, categoryId, uncategorized, page, size, sort, direction
+        ));
     }
 
     @PutMapping("/{budgetId}")
