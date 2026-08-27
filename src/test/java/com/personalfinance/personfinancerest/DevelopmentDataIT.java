@@ -5,9 +5,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.http.MediaType;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -74,7 +77,7 @@ class DevelopmentDataIT {
 
         mockMvc.perform(get("/api/v1/budgets").queryParam("status", "all"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].name").value("August Spending Plan"))
                 .andExpect(jsonPath("$[0].currency").value("USD"))
                 .andExpect(jsonPath("$[0].totalPlanned").value(800.0))
@@ -98,5 +101,32 @@ class DevelopmentDataIT {
                         "40000000-0000-0000-0000-000000000011",
                         "40000000-0000-0000-0000-000000000012"
                 )));
+    }
+
+    @Test
+    @Transactional
+    void suppliesAnArchivedCopySourceAndAnOccupiedTargetMonth() throws Exception {
+        String source = "/api/v1/budgets/70000000-0000-0000-0000-000000000002";
+        mockMvc.perform(get(source))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("archived"))
+                .andExpect(jsonPath("$.totalPlanned").value(700.75));
+        mockMvc.perform(post(source + "/copy").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetMonth\":\"2026-09\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("active"))
+                .andExpect(jsonPath("$.version").value(0))
+                .andExpect(jsonPath("$.startDate").value("2026-09-01"))
+                .andExpect(jsonPath("$.endDate").value("2026-09-30"))
+                .andExpect(jsonPath("$.totalPlanned").value(700.75))
+                .andExpect(jsonPath("$.lines.length()").value(2));
+        mockMvc.perform(post(source + "/copy").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetMonth\":\"2026-08\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.existingBudgetId").value("70000000-0000-0000-0000-000000000001"));
+        mockMvc.perform(get(source))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("archived"))
+                .andExpect(jsonPath("$.version").value(4));
     }
 }

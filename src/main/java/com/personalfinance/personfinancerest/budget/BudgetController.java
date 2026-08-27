@@ -42,6 +42,13 @@ class BudgetController {
         return service.findAll(BudgetStatusFilter.fromValue(status));
     }
 
+    @PostMapping("/{budgetId}/copy")
+    ResponseEntity<BudgetResponse> copy(@PathVariable UUID budgetId,
+                                        @Valid @RequestBody CopyBudgetRequest request) {
+        BudgetResponse response = service.copy(budgetId, request);
+        return ResponseEntity.created(URI.create("/api/v1/budgets/" + response.id())).body(response);
+    }
+
     @GetMapping("/{budgetId}")
     BudgetResponse findById(@PathVariable UUID budgetId) {
         return service.findById(budgetId);

@@ -12,6 +12,7 @@ import com.personalfinance.personfinancerest.category.CategoryHierarchyConflictE
 import com.personalfinance.personfinancerest.category.DuplicateCategoryNameException;
 import com.personalfinance.personfinancerest.category.InvalidCategoryStatusException;
 import com.personalfinance.personfinancerest.budget.BudgetConflictException;
+import com.personalfinance.personfinancerest.budget.BudgetTargetMonthConflictException;
 import com.personalfinance.personfinancerest.budget.BudgetLineNotFoundException;
 import com.personalfinance.personfinancerest.budget.BudgetNotFoundException;
 import com.personalfinance.personfinancerest.budget.InvalidBudgetRequestException;
@@ -106,6 +107,13 @@ class ApiExceptionHandler {
         ApiError response = new ApiError(
                 Instant.now(), HttpStatus.CONFLICT.value(), exception.getMessage(), Map.of()
         );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler(BudgetTargetMonthConflictException.class)
+    ResponseEntity<ApiError> handleBudgetTargetMonthConflict(BudgetTargetMonthConflictException exception) {
+        ApiError response = new ApiError(Instant.now(), HttpStatus.CONFLICT.value(),
+                exception.getMessage(), Map.of(), exception.getExistingBudgetId());
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
 
