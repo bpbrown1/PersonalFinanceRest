@@ -397,7 +397,15 @@ Each drill-down now also supplies a bookmarkable `transactionsPath`. The endpoin
 - `scope=unbudgeted&categoryId={categoryId}` for one unbudgeted category.
 - `scope=unbudgeted&uncategorized=true` for uncategorized spending.
 
+`overall` is the default scope. Every scope accepts an optional owned `accountId`; dates and currency come from the budget. Line scope requires an active `lineId` and rejects category selectors. Unbudgeted scope requires exactly one of an exact category or `uncategorized=true`.
+
 The server recomputes the selected scope from the owned budget instead of accepting transaction IDs from the client. It therefore preserves the same inclusive dates, currency, active-expense, hierarchy, split-allocation, refund, deletion, and most-specific-line rules as the progress total. A transaction appears once even when several matching allocations belong to it. Unknown or foreign budgets, lines, accounts, and categories return the established not-found errors; incompatible scope parameters return the standard validation response.
+
+Returned split transactions retain their full allocation. Reconcile a line or category total using only the contributing split amounts, not by summing whole parent transaction amounts. The links resolve live data, not frozen snapshots. HTTP results are paginated, but progress calculation currently materializes matching allocations and transaction IDs before the database page query.
+
+Known limitation identified on 2026-08-27: a line link from a category-filtered progress response does not retain that category filter. Line scope recomputes the full line, optionally restricted by account, and can therefore return more transactions than contributed to the filtered line total. Overall scope does preserve its category filter. A follow-up fix and regression test are needed before category-filtered line links can be treated as exact reconciliation.
+
+US-049 and US-056 were moved to Done on 2026-08-27. Their finalized designs document the implementation and the limitation above: [budget progress](https://app.notion.com/p/3c6308cf6b5381f0a220ed0e77e63fb5) and [transaction drill-downs](https://app.notion.com/p/3c7308cf6b5381be8524f1c1cc58166f).
 
 ## Error contract
 
