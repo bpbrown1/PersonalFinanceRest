@@ -15,6 +15,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -70,15 +71,25 @@ class BudgetService {
                     throw new BudgetTargetMonthConflictException(month, existing.getId());
                 });
 
+        List<CreateBudgetLineRequest> targetLines = request.lines() == null
+                ? source.getLines().stream()
+                    .filter(line -> line.getStatus() == BudgetStatus.ACTIVE)
+                    .sorted(Comparator.comparingInt(BudgetLine::getPosition))
+                    .map(line -> new CreateBudgetLineRequest(line.getCategoryId(), line.getPlannedAmount()))
+                    .toList()
+                : request.lines();
+        ensureUniqueCategories(targetLines.stream().map(CreateBudgetLineRequest::categoryId).toList());
+        List<BigDecimal> plannedAmounts = new ArrayList<>(targetLines.size());
+        for (int index = 0; index < targetLines.size(); index++) {
+            CreateBudgetLineRequest line = targetLines.get(index);
+            validateNewCategory(line.categoryId(), ownerId);
+            plannedAmounts.add(plannedAmount(line.plannedAmount(), "lines[" + index + "].plannedAmount"));
+        }
+
         Budget copy = new Budget(UUID.randomUUID(), ownerId, source.getName(), source.getCurrency(),
                 month.atDay(1), month.atEndOfMonth());
-        List<BudgetLine> activeLines = source.getLines().stream()
-                .filter(line -> line.getStatus() == BudgetStatus.ACTIVE)
-                .sorted(Comparator.comparingInt(BudgetLine::getPosition))
-                .toList();
-        for (BudgetLine line : activeLines) {
-            validateNewCategory(line.getCategoryId(), ownerId);
-            copy.addLine(line.getCategoryId(), plannedAmount(line.getPlannedAmount(), "lines"));
+        for (int index = 0; index < targetLines.size(); index++) {
+            copy.addLine(targetLines.get(index).categoryId(), plannedAmounts.get(index));
         }
         return BudgetResponse.from(save(copy));
     }

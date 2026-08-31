@@ -126,6 +126,96 @@ class BudgetCopyApiIT {
     }
 
     @Test
+    void reviewedLinesReplaceTheCompleteTargetSetAndPreserveSubmittedOrder() throws Exception {
+        UUID removed = category("Removed", "expense");
+        UUID retained = category("Retained", "expense");
+        UUID added = category("Added", "both");
+        UUID source = create(List.of(line(removed, "10.00"), line(retained, "20.00")));
+        JsonNode sourceBefore = budget(source);
+
+        var result = copy(source, Map.of(
+                        "targetMonth", "2028-02",
+                        "lines", List.of(line(added, "30.50"), line(retained, "25.25"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.lines.length()").value(2))
+                .andExpect(jsonPath("$.lines[0].categoryId").value(added.toString()))
+                .andExpect(jsonPath("$.lines[0].plannedAmount").value(30.5))
+                .andExpect(jsonPath("$.lines[0].position").value(0))
+                .andExpect(jsonPath("$.lines[1].categoryId").value(retained.toString()))
+                .andExpect(jsonPath("$.lines[1].plannedAmount").value(25.25))
+                .andExpect(jsonPath("$.lines[1].position").value(1))
+                .andExpect(jsonPath("$.totalPlanned").value(55.75))
+                .andReturn().getResponse();
+
+        JsonNode copied = mapper.readTree(result.getContentAsString());
+        assertThat(copied.get("lines").get(0).get("id").asText())
+                .isNotIn(sourceBefore.get("lines").get(0).get("id").asText(),
+                        sourceBefore.get("lines").get(1).get("id").asText());
+        assertThat(copied.get("lines").get(1).get("id").asText())
+                .isNotIn(sourceBefore.get("lines").get(0).get("id").asText(),
+                        sourceBefore.get("lines").get(1).get("id").asText());
+        assertThat(budget(source)).isEqualTo(sourceBefore);
+    }
+
+    @Test
+    void explicitEmptyReviewedLinesCreateAnEmptyTarget() throws Exception {
+        UUID source = create(List.of(line(category("Rent", "expense"), "1000.00")));
+
+        copy(source, Map.of("targetMonth", "2028-02", "lines", List.of()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.lines").isEmpty())
+                .andExpect(jsonPath("$.totalPlanned").value(0.0));
+    }
+
+    @Test
+    void reviewedLinesCanRemediateAnInvalidActiveSourceCategory() throws Exception {
+        UUID invalid = category("Old utility", "expense");
+        UUID replacement = category("Current utility", "both");
+        UUID source = create(List.of(line(invalid, "90.00")));
+        mockMvc.perform(post("/api/v1/categories/{id}/archive", invalid)).andExpect(status().isOk());
+
+        copy(source, Map.of("targetMonth", "2028-02", "lines", List.of(line(replacement, "95.00"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.lines.length()").value(1))
+                .andExpect(jsonPath("$.lines[0].categoryId").value(replacement.toString()));
+    }
+
+    @Test
+    void rejectsInvalidReviewedDraftsWithFieldErrorsAndRollsBack() throws Exception {
+        UUID category = category("Rent", "expense");
+        UUID source = create(List.of());
+        copy(source, Map.of("targetMonth", "2028-02", "lines", List.of(
+                        line(category, "1.00"), line(category, "2.00"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.lines").exists());
+        assertThat(repository.count()).isEqualTo(1);
+
+        copy(source, Map.of("targetMonth", "2028-03", "lines", List.of(
+                        Map.of("categoryId", category, "plannedAmount", new BigDecimal("-1.001")))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors['lines[0].plannedAmount']").exists());
+        assertThat(repository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void rejectsIneligibleOrForeignReviewedCategoriesWithoutPartialCopy() throws Exception {
+        UUID archived = category("Archived", "expense");
+        UUID income = category("Salary", "income");
+        UUID foreign = category("Foreign", "expense");
+        UUID source = create(List.of());
+        mockMvc.perform(post("/api/v1/categories/{id}/archive", archived)).andExpect(status().isOk());
+
+        copy(source, Map.of("targetMonth", "2028-02", "lines", List.of(line(archived, "1.00"))))
+                .andExpect(status().isConflict());
+        copy(source, Map.of("targetMonth", "2028-03", "lines", List.of(line(income, "1.00"))))
+                .andExpect(status().isConflict());
+        jdbc.update("UPDATE transaction_category SET owner_id = ? WHERE id = ?", otherOwner(), foreign);
+        copy(source, Map.of("targetMonth", "2028-04", "lines", List.of(line(foreign, "1.00"))))
+                .andExpect(status().isNotFound());
+        assertThat(repository.count()).isEqualTo(1);
+    }
+
+    @Test
     void rejectsOccupiedMonthsAcrossCurrenciesAndLifecycleWithDeterministicExistingId() throws Exception {
         UUID source = create(List.of());
         UUID existing = UUID.randomUUID();
@@ -297,8 +387,12 @@ class BudgetCopyApiIT {
     }
 
     private ResultActions copy(UUID source, String month) throws Exception {
+        return copy(source, Map.of("targetMonth", month));
+    }
+
+    private ResultActions copy(UUID source, Map<String, Object> request) throws Exception {
         return mockMvc.perform(post("/api/v1/budgets/{id}/copy", source)
-                .contentType(MediaType.APPLICATION_JSON).content(json(Map.of("targetMonth", month))));
+                .contentType(MediaType.APPLICATION_JSON).content(json(request)));
     }
 
     private UUID create(List<Map<String, Object>> lines) throws Exception {
