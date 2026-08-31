@@ -14,6 +14,8 @@ class TransactionTypeTest {
 
         assertThat(TransactionType.INCOME.balanceImpact(amount)).isEqualByComparingTo("25.00");
         assertThat(TransactionType.EXPENSE.balanceImpact(amount)).isEqualByComparingTo("-25.00");
+        assertThat(TransactionType.TRANSFER_OUT.balanceImpact(amount)).isEqualByComparingTo("-25.00");
+        assertThat(TransactionType.TRANSFER_IN.balanceImpact(amount)).isEqualByComparingTo("25.00");
         assertThat(TransactionType.fromValue(" income ")).isEqualTo(TransactionType.INCOME);
         assertThat(TransactionType.EXPENSE.toValue()).isEqualTo("expense");
     }

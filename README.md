@@ -20,7 +20,7 @@ Activate the `dev` Spring profile to start the in-memory H2 database with repres
 SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 ```
 
-The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, and active and recoverably deleted transactions. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
+The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, same-currency and cross-currency transfers, and monthly budgets with active and archived lines. An archived July plan is available as a copy source; August is already occupied and September is initially free. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
 
 Production migrations remain in `db/migration`; sample data must stay under `dev/db/migration`. When a feature adds required tables, relationships, or useful frontend states, update the development seed and `DevelopmentDataIT` together. The fixed seed UUIDs should remain stable unless a relationship is intentionally replaced.
 
@@ -165,17 +165,89 @@ Record income or spending with `POST /api/v1/transactions`:
 }
 ```
 
-`amount` is always a positive magnitude. Supported types are `income` and `expense`; the response's `balanceImpact` is positive for income and negative for expense. Creating, replacing, deleting, restoring, or moving an active transaction updates the affected account balances by the net change.
+Supported types are `income` and `expense`. Income amounts and ordinary expense amounts are positive. An expense refund or credit is recorded as a negative expense amount, which reduces spending and produces a positive `balanceImpact`; zero and negative income amounts are invalid. Creating, replacing, deleting, restoring, or moving an active transaction updates the affected account balances by the net change.
 
-- `GET /api/v1/transactions` returns active owned transactions, newest transaction date first.
-- `GET /api/v1/transactions?status=deleted` returns soft-deleted transactions.
-- `GET /api/v1/transactions?status=all` returns both lifecycle states.
+- `GET /api/v1/transactions` returns the first page of active owned transactions.
+- `GET /api/v1/transactions?status=deleted` searches soft-deleted transactions.
+- `GET /api/v1/transactions?status=all` searches both lifecycle states.
 - `GET /api/v1/transactions/{transactionId}` retrieves one owned transaction.
 - `PUT /api/v1/transactions/{transactionId}` fully replaces its editable fields; nullable optional fields can therefore be cleared.
 - `DELETE /api/v1/transactions/{transactionId}` soft-deletes it idempotently and reverses its balance impact.
 - `POST /api/v1/transactions/{transactionId}/restore` restores it idempotently and reapplies its balance impact.
 
 Transactions require an active owned account, cannot predate that account's opening date or be future-dated, and may reference an active owned category compatible with their type. A retained archived category remains available to its existing transaction, preserving history. Even deleted transactions count as account activity, so currency and opening terms remain protected.
+
+An income or expense can use either the optional parent `categoryId` above or an ordered `splits` allocation, never both:
+
+```json
+{
+  "accountId": "0dfae49e-6765-4f9f-b485-53d17338a106",
+  "amount": 100.00,
+  "transactionDate": "2026-08-23",
+  "description": "Household purchase",
+  "type": "expense",
+  "categoryId": null,
+  "splits": [
+    { "categoryId": "50ea8ada-6436-4624-bbb9-a33c9a3631e2", "amount": 75.25 },
+    { "categoryId": "e9d0ccb5-6362-4bf7-9d8f-fcc9e1bf2f4a", "amount": 24.75 }
+  ]
+}
+```
+
+A split requires at least two non-zero rows with distinct owned, type-compatible categories. Every split must use the transaction amount's sign, so refund allocations are all negative. All monetary values use the application's fixed two-decimal currency scale, and split amounts must equal the normalized transaction amount exactly; the server never creates a remainder row. Transfers cannot be split.
+
+Create requests omit split IDs. Responses expose each row's stable `id`, zero-based `position`, `categoryId`, and `amount`. Full `PUT` requests retain IDs for unchanged rows, omit IDs for new rows, and delete rows omitted from the replacement allocation. Existing IDs cannot be moved between transactions. New or reassigned rows require active categories; an unchanged row may retain an archived category. Supplying no splits returns the transaction to the single-category contract. Soft deletion and restoration retain the allocation.
+
+Allocation validation uses indexed field keys such as `splits[0].id`, `splits[0].categoryId`, and `splits[0].amount`; row-count, duplicate-category, and total-mismatch failures use `splits`.
+
+Transaction search supports these combinable query parameters:
+
+- `accountId`, inclusive `from` and `to` dates, `categoryId`, and `type`.
+- Inclusive `minAmount` and `maxAmount` signed boundaries.
+- Case-insensitive `text` matching description, merchant/payee, notes, or external reference.
+- Zero-based `page` (default `0`) and `size` from 1 through 100 (default `25`).
+- `sort=date|amount` and `direction=asc|desc` (defaults `date,desc`).
+
+The response is a stable page envelope:
+
+```json
+{
+  "items": [],
+  "page": 0,
+  "size": 25,
+  "totalElements": 0,
+  "totalPages": 0,
+  "sortBy": "date",
+  "sortDirection": "desc"
+}
+```
+
+Date and amount boundaries are inclusive. Filters combine with AND. Date sorting uses creation time and ID tie-breakers; amount sorting uses transaction date and ID tie-breakers. Invalid ranges, page sizes, types, or sort values use the shared field-error response.
+
+## Transfer contract
+
+Record an atomic transfer with `POST /api/v1/transfers`:
+
+```json
+{
+  "sourceAccountId": "0dfae49e-6765-4f9f-b485-53d17338a106",
+  "destinationAccountId": "70dbce4a-1e87-43cf-9fac-4ffeb0185690",
+  "sourceAmount": 100.00,
+  "destinationAmount": 92.00,
+  "transactionDate": "2026-08-23",
+  "description": "Travel cash exchange",
+  "notes": null,
+  "externalReference": null
+}
+```
+
+The source and destination accounts must be distinct, active, owned accounts. Same-currency transfers require equal amounts; cross-currency transfers require explicit source and destination amounts and do not infer an exchange rate. Each transfer is stored as linked `transfer_out` and `transfer_in` ledger entries sharing a `transferId`. Those legs appear in the transaction ledger but must be changed only through the aggregate transfer endpoints.
+
+- `GET /api/v1/transfers` lists active transfers; `status=deleted|all` selects other lifecycle views.
+- `GET /api/v1/transfers/{transferId}` retrieves one owned transfer.
+- `PUT /api/v1/transfers/{transferId}` atomically replaces both linked legs.
+- `DELETE /api/v1/transfers/{transferId}` soft-deletes both legs and reverses both balance impacts.
+- `POST /api/v1/transfers/{transferId}/restore` restores both legs and reapplies both impacts.
 
 Retrieve active transaction totals grouped by account currency with:
 
@@ -193,9 +265,139 @@ Retrieve active transaction totals grouped by account currency with:
 ]
 ```
 
-`income` and `spending` are positive fixed-decimal totals, and `netImpact` is income minus spending. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Only active transactions owned by the current user are included. Results are ordered by currency, and a range with no activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error. US-008 will add the same account, category, and type filters to both summaries and paginated ledger retrieval.
+`income` and `spending` are fixed-decimal totals, and `netImpact` is income minus spending. Negative expense refunds reduce `spending`, which may become negative when credits exceed purchases. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Optional `accountId`, `categoryId`, and `type` filters match the paged ledger semantics. A category filter matches either an unsplit parent category or an individual split row; split amounts are aggregated without also counting the parent amount. `transactionCount` remains the distinct number of matching transactions. Only active income and expense transactions owned by the current user are included; transfer legs are excluded from every total and from `transactionCount`. Results are ordered by currency, and a range with no qualifying activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error.
 
 Balance snapshots and transaction-driven balance changes currently share the account's `currentBalance` projection. A newly effective snapshot sets the observed balance; subsequent transaction changes apply deltas. Full automatic reconciliation between the ledger and observed snapshots is intentionally deferred to the dedicated reconciliation story.
+
+## Budget contract
+
+Create a monthly budget with `POST /api/v1/budgets`:
+
+```json
+{
+  "name": "August Spending Plan",
+  "currency": "USD",
+  "startDate": "2026-08-01",
+  "endDate": "2026-08-31",
+  "lines": [
+    { "categoryId": "50ea8ada-6436-4624-bbb9-a33c9a3631e2", "plannedAmount": 600.00 }
+  ]
+}
+```
+
+The dates must span one complete calendar month. Multiple owned budgets may cover the same month, including historical months. Lines use active, owned categories applicable to expenses or both transaction types, and a category can occur only once among all retained lines in a budget. Monetary amounts are non-negative and normalized to two decimals. `totalPlanned` is the sum of active lines only.
+
+- `GET /api/v1/budgets?status=active|archived|all` lists owned budgets; active is the default.
+- `GET /api/v1/budgets/{budgetId}` retrieves one owned budget.
+- `POST /api/v1/budgets/{budgetId}/copy` creates an independent copy for an unused target month.
+- `GET /api/v1/budgets/{budgetId}/progress` calculates live planned-versus-actual progress. Optional `accountId` and `categoryId` filters restrict contributing activity.
+- `GET /api/v1/budgets/{budgetId}/progress/transactions` pages through the exact transactions behind an overall, line, or unbudgeted progress total.
+- `PUT /api/v1/budgets/{budgetId}` fully replaces its name, currency, and monthly period.
+- `POST /api/v1/budgets/{budgetId}/archive` and `/restore` change lifecycle state idempotently.
+- `POST /api/v1/budgets/{budgetId}/lines` appends a line.
+- `PUT /api/v1/budgets/{budgetId}/lines/{lineId}` replaces its category and amount.
+- `PUT /api/v1/budgets/{budgetId}/lines/reorder` accepts every retained line ID in the desired order.
+- `POST /api/v1/budgets/{budgetId}/lines/{lineId}/archive` and `/restore` preserve line history.
+
+Budget and line IDs remain stable, and responses include lifecycle timestamps plus the budget's optimistic-lock `version`. Archived budgets are immutable until restored; active historical budgets remain correctable. There are intentionally no permanent-delete endpoints.
+
+### Copy a budget to another month
+
+`POST /api/v1/budgets/{budgetId}/copy`
+
+```json
+{"targetMonth": "2026-09"}
+```
+
+To copy a reviewed draft instead of the source lines, submit the complete ordered target set:
+
+```json
+{
+  "targetMonth": "2026-09",
+  "lines": [
+    {"categoryId": "30000000-0000-0000-0000-000000000004", "plannedAmount": 200.00},
+    {"categoryId": "30000000-0000-0000-0000-000000000001", "plannedAmount": 550.00}
+  ]
+}
+```
+
+`targetMonth` must use `YYYY-MM` with a valid month and a year from 0001 through 9999. The server derives the complete calendar period, including leap days. Success returns `201 Created`, a `Location` header, and the normal budget response.
+
+An active or archived owned budget can be a source. When `lines` is omitted or `null`, the copy retains its name, currency, and active lines' category IDs, exact planned amounts, and relative order. Supplying `lines` instead treats them as the complete reviewed target set, so categories can be added, removed, reordered, or assigned new planned amounts without changing the source. An explicit empty array creates an empty target budget. Reviewed lines contain only `categoryId` and `plannedAmount`; source line IDs are never accepted or copied.
+
+Positions are compacted to start at zero. Budget and line IDs and timestamps are new, lifecycle states are active, and version starts at zero. Archived source lines are omitted only for the fallback copy; reviewed lines replace the fallback entirely. The source is not modified, subsequent edits to either budget are independent, and actual spending is not copied: progress uses the target month's own transactions.
+
+Copied lines are new associations, so all effective target categories must be unique, currently owned, active, and expense-compatible, and planned amounts must be non-negative with at most two decimals. Validation errors for reviewed values use indexed paths such as `lines[0].plannedAmount`. With fallback behavior, an active source line referencing an archived or income-only category rejects the whole copy with `409`; a reviewed draft can remediate that source by omitting or replacing the invalid line. Missing or foreign resources return `404`. Archived source lines are skipped before fallback validation.
+
+A copy is rejected if any budget already exists for this owner in the target month, including archived budgets, other currencies, and the source itself. The `409` response keeps the normal error envelope and adds `existingBudgetId` for navigation. If several existing budgets occupy the month, the earliest created (then lowest ID) is returned. Invalid month input returns `400` with a `targetMonth` field error.
+
+Create, copy, and metadata-update transactions use an owner-row database lock to coordinate month checks and writes, including concurrent copies from different sources. The check and complete copy commit atomically. This is a copy-specific precondition, not a new global uniqueness rule: ordinary create/update endpoints retain their existing multiple-budget-per-month behavior. No schema migration or automatic recurring generation is introduced.
+
+Development example: copy archived source `70000000-0000-0000-0000-000000000002` to `2026-09`, or select `2026-08` to exercise the existing-budget conflict.
+
+### Budget progress
+
+An abridged progress response is shaped for both summary cards and line-item drill-down:
+
+```json
+{
+  "budgetId": "70000000-0000-0000-0000-000000000001",
+  "currency": "USD",
+  "startDate": "2026-08-01",
+  "endDate": "2026-08-31",
+  "planned": 800.00,
+  "budgetedActual": 153.65,
+  "unbudgetedActual": 35.00,
+  "totalActual": 188.65,
+  "remaining": 611.35,
+  "percentageUsed": 23.58,
+  "lines": [
+    {
+      "lineId": "71000000-0000-0000-0000-000000000001",
+      "categoryId": "30000000-0000-0000-0000-000000000001",
+      "planned": 600.00,
+      "actual": 153.65,
+      "remaining": 446.35,
+      "percentageUsed": 25.61,
+      "drillDown": {
+        "from": "2026-08-01",
+        "to": "2026-08-31",
+        "type": "expense",
+        "status": "active",
+        "transactionIds": [
+          "40000000-0000-0000-0000-000000000002",
+          "40000000-0000-0000-0000-000000000003",
+          "40000000-0000-0000-0000-000000000011"
+        ],
+        "transactionsPath": "/api/v1/budgets/70000000-0000-0000-0000-000000000001/progress/transactions?scope=line&lineId=71000000-0000-0000-0000-000000000001"
+      }
+    }
+  ],
+  "unbudgeted": [
+    {
+      "categoryId": null,
+      "actual": 35.00,
+      "drillDown": {
+        "transactionIds": ["40000000-0000-0000-0000-000000000012"],
+        "transactionsPath": "/api/v1/budgets/70000000-0000-0000-0000-000000000001/progress/transactions?scope=unbudgeted&uncategorized=true"
+      }
+    }
+  ]
+}
+```
+
+Budget progress is recalculated from active expense transactions in the inclusive budget period and matching account currency. Positive expenses increase actual spending; negative expense refunds reduce it. Income, transfers, soft-deleted transactions, foreign owners, other currencies, and out-of-period activity are excluded. Split rows contribute their allocated amounts rather than the parent amount.
+
+Only active budget lines receive progress. A line includes its category and descendants. When parent and child lines overlap, each allocation goes to the closest matching line (then line position), preventing double counting. Unmatched and uncategorized spending is returned in separate `unbudgeted` rows. Overall fields distinguish `budgetedActual`, `unbudgetedActual`, and `totalActual`; overall remaining is planned minus total actual. Negative remaining and percentages above 100 are preserved, while a zero planned amount returns a null percentage. Every line and unbudgeted row includes stable contributing transaction IDs plus its date, account, category, type, and lifecycle drill-down filters.
+
+Each drill-down now also supplies a bookmarkable `transactionsPath`. The endpoint returns the established transaction page response and accepts `page`, `size`, `sort`, and `direction` just like transaction search. Supported scopes are:
+
+- `scope=overall`, with optional `accountId` and hierarchical `categoryId` filters.
+- `scope=line&lineId={lineId}`, with optional `accountId`.
+- `scope=unbudgeted&categoryId={categoryId}` for one unbudgeted category.
+- `scope=unbudgeted&uncategorized=true` for uncategorized spending.
+
+The server recomputes the selected scope from the owned budget instead of accepting transaction IDs from the client. It therefore preserves the same inclusive dates, currency, active-expense, hierarchy, split-allocation, refund, deletion, and most-specific-line rules as the progress total. A transaction appears once even when several matching allocations belong to it. Unknown or foreign budgets, lines, accounts, and categories return the established not-found errors; incompatible scope parameters return the standard validation response.
 
 ## Error contract
 

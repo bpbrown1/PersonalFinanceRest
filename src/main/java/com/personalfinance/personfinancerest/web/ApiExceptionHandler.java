@@ -11,10 +11,19 @@ import com.personalfinance.personfinancerest.category.CategoryNotFoundException;
 import com.personalfinance.personfinancerest.category.CategoryHierarchyConflictException;
 import com.personalfinance.personfinancerest.category.DuplicateCategoryNameException;
 import com.personalfinance.personfinancerest.category.InvalidCategoryStatusException;
+import com.personalfinance.personfinancerest.budget.BudgetConflictException;
+import com.personalfinance.personfinancerest.budget.BudgetTargetMonthConflictException;
+import com.personalfinance.personfinancerest.budget.BudgetLineNotFoundException;
+import com.personalfinance.personfinancerest.budget.BudgetNotFoundException;
+import com.personalfinance.personfinancerest.budget.InvalidBudgetRequestException;
+import com.personalfinance.personfinancerest.budget.InvalidBudgetStatusException;
 import com.personalfinance.personfinancerest.transaction.InvalidTransactionDateRangeException;
 import com.personalfinance.personfinancerest.transaction.InvalidTransactionStatusException;
+import com.personalfinance.personfinancerest.transaction.InvalidTransactionSearchException;
+import com.personalfinance.personfinancerest.transaction.InvalidTransactionAllocationException;
 import com.personalfinance.personfinancerest.transaction.TransactionConflictException;
 import com.personalfinance.personfinancerest.transaction.TransactionNotFoundException;
+import com.personalfinance.personfinancerest.transaction.TransferNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -93,6 +102,21 @@ class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
 
+    @ExceptionHandler(BudgetConflictException.class)
+    ResponseEntity<ApiError> handleBudgetConflict(BudgetConflictException exception) {
+        ApiError response = new ApiError(
+                Instant.now(), HttpStatus.CONFLICT.value(), exception.getMessage(), Map.of()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler(BudgetTargetMonthConflictException.class)
+    ResponseEntity<ApiError> handleBudgetTargetMonthConflict(BudgetTargetMonthConflictException exception) {
+        ApiError response = new ApiError(Instant.now(), HttpStatus.CONFLICT.value(),
+                exception.getMessage(), Map.of(), exception.getExistingBudgetId());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
     @ExceptionHandler(InvalidAccountStatusException.class)
     ResponseEntity<ApiError> handleInvalidAccountStatus(InvalidAccountStatusException exception) {
         return badRequest("Validation failed", Map.of("status", exception.getMessage()));
@@ -108,9 +132,29 @@ class ApiExceptionHandler {
         return badRequest("Validation failed", Map.of("status", exception.getMessage()));
     }
 
+    @ExceptionHandler(InvalidBudgetStatusException.class)
+    ResponseEntity<ApiError> handleInvalidBudgetStatus(InvalidBudgetStatusException exception) {
+        return badRequest("Validation failed", Map.of("status", exception.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidBudgetRequestException.class)
+    ResponseEntity<ApiError> handleInvalidBudgetRequest(InvalidBudgetRequestException exception) {
+        return badRequest("Validation failed", exception.getFieldErrors());
+    }
+
     @ExceptionHandler(InvalidTransactionDateRangeException.class)
     ResponseEntity<ApiError> handleInvalidTransactionDateRange(InvalidTransactionDateRangeException exception) {
         return badRequest("Validation failed", Map.of("dateRange", exception.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidTransactionSearchException.class)
+    ResponseEntity<ApiError> handleInvalidTransactionSearch(InvalidTransactionSearchException exception) {
+        return badRequest("Validation failed", Map.of(exception.getField(), exception.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidTransactionAllocationException.class)
+    ResponseEntity<ApiError> handleInvalidTransactionAllocation(InvalidTransactionAllocationException exception) {
+        return badRequest("Validation failed", exception.getFieldErrors());
     }
 
     @ExceptionHandler(FinancialAccountNotFoundException.class)
@@ -135,8 +179,16 @@ class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
 
-    @ExceptionHandler(TransactionNotFoundException.class)
-    ResponseEntity<ApiError> handleTransactionNotFound(TransactionNotFoundException exception) {
+    @ExceptionHandler({TransactionNotFoundException.class, TransferNotFoundException.class})
+    ResponseEntity<ApiError> handleTransactionNotFound(RuntimeException exception) {
+        ApiError response = new ApiError(
+                Instant.now(), HttpStatus.NOT_FOUND.value(), exception.getMessage(), Map.of()
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+    }
+
+    @ExceptionHandler({BudgetNotFoundException.class, BudgetLineNotFoundException.class})
+    ResponseEntity<ApiError> handleBudgetNotFound(RuntimeException exception) {
         ApiError response = new ApiError(
                 Instant.now(), HttpStatus.NOT_FOUND.value(), exception.getMessage(), Map.of()
         );

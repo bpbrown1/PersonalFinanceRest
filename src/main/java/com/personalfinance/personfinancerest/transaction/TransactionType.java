@@ -8,7 +8,9 @@ import java.util.Locale;
 
 public enum TransactionType {
     INCOME,
-    EXPENSE;
+    EXPENSE,
+    TRANSFER_OUT,
+    TRANSFER_IN;
 
     @JsonCreator
     public static TransactionType fromValue(String value) {
@@ -21,6 +23,13 @@ public enum TransactionType {
     }
 
     BigDecimal balanceImpact(BigDecimal amount) {
-        return this == INCOME ? amount : amount.negate();
+        return switch (this) {
+            case INCOME, TRANSFER_IN -> amount;
+            case EXPENSE, TRANSFER_OUT -> amount.negate();
+        };
+    }
+
+    boolean isTransfer() {
+        return this == TRANSFER_OUT || this == TRANSFER_IN;
     }
 }

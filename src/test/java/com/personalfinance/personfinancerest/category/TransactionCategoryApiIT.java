@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 
@@ -25,6 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 class TransactionCategoryApiIT {
 
     @Autowired
@@ -47,9 +49,14 @@ class TransactionCategoryApiIT {
 
     @BeforeEach
     void clearCategories() {
+        jdbcTemplate.update("DELETE FROM budget_line");
+        jdbcTemplate.update("DELETE FROM budget");
+        jdbcTemplate.update("DELETE FROM transaction_split");
         jdbcTemplate.update("DELETE FROM financial_transaction");
         jdbcTemplate.update("UPDATE transaction_category SET parent_id = NULL");
         jdbcTemplate.update("DELETE FROM transaction_category");
+        jdbcTemplate.update("DELETE FROM account_balance_snapshot");
+        jdbcTemplate.update("DELETE FROM financial_account");
         jdbcTemplate.update("DELETE FROM app_user WHERE id <> ?", currentUserProvider.userId());
     }
 

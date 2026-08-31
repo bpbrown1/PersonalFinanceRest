@@ -14,6 +14,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -186,25 +189,31 @@ class FinancialTransactionServiceTest {
         givenOwnerAndLockedAccount(account);
         CreateTransactionRequest beforeOpening = new CreateTransactionRequest(
                 accountId, new BigDecimal("10.00"), account.getOpeningDate().minusDays(1),
-                "Invalid", TransactionType.EXPENSE, null, null, null, null
+                "Invalid", TransactionType.EXPENSE, null, null, null, null, null
         );
         assertThatThrownBy(() -> service.create(beforeOpening))
                 .isInstanceOf(TransactionConflictException.class).hasMessageContaining("opening date");
     }
 
     @Test
-    void selectsTheRequestedOwnerScopedList() {
+    @SuppressWarnings("unchecked")
+    void returnsAnOwnerScopedPageWithRequestedMetadata() {
         given(currentUserProvider.userId()).willReturn(ownerId);
-        given(repository.findAllByOwnerIdAndDeletedAtIsNullOrderByTransactionDateDescCreatedAtDesc(ownerId))
-                .willReturn(List.of(transaction));
-        given(repository.findAllByOwnerIdAndDeletedAtIsNotNullOrderByTransactionDateDescCreatedAtDesc(ownerId))
-                .willReturn(List.of(transaction));
-        given(repository.findAllByOwnerIdOrderByTransactionDateDescCreatedAtDesc(ownerId))
-                .willReturn(List.of(transaction));
+        given(repository.findAll(any(Specification.class), any(Pageable.class)))
+                .willReturn(new PageImpl<>(List.of(transaction)));
+        TransactionSearchCriteria criteria = TransactionSearchCriteria.from(
+                "active", null, null, null, null, null, null, null,
+                null, 0, 25, "date", "desc"
+        );
 
-        assertThat(service.findAll(TransactionStatusFilter.ACTIVE)).hasSize(1);
-        assertThat(service.findAll(TransactionStatusFilter.DELETED)).hasSize(1);
-        assertThat(service.findAll(TransactionStatusFilter.ALL)).hasSize(1);
+        TransactionPageResponse response = service.search(criteria);
+
+        assertThat(response.items()).hasSize(1);
+        assertThat(response.page()).isZero();
+        assertThat(response.size()).isEqualTo(1);
+        assertThat(response.totalElements()).isEqualTo(1);
+        assertThat(response.sortBy()).isEqualTo("date");
+        assertThat(response.sortDirection()).isEqualTo("desc");
     }
 
     @Test
@@ -217,7 +226,7 @@ class FinancialTransactionServiceTest {
         given(currentUserProvider.userId()).willReturn(ownerId);
         given(repository.summarize(
                 ownerId, transactionDate.minusDays(1), transactionDate,
-                TransactionType.INCOME, TransactionType.EXPENSE
+                TransactionType.INCOME, TransactionType.EXPENSE, null, null, null
         )).willReturn(List.of(aggregate));
 
         TransactionSummaryResponse response = service.summarize(
@@ -237,7 +246,9 @@ class FinancialTransactionServiceTest {
                 .isInstanceOf(InvalidTransactionDateRangeException.class)
                 .hasMessage("from must be on or before to");
 
-        verify(repository, never()).summarize(any(), any(), any(), any(), any());
+        verify(repository, never()).summarize(
+                any(), any(), any(), any(), any(), any(), any(), any()
+        );
     }
 
     private void givenOwnerAndLockedAccount(FinancialAccount lockedAccount) {
@@ -273,7 +284,7 @@ class FinancialTransactionServiceTest {
     private CreateTransactionRequest createRequest(String amount, TransactionType type, UUID categoryId) {
         return new CreateTransactionRequest(
                 accountId, new BigDecimal(amount), transactionDate, "Groceries", type,
-                categoryId, "Market", null, null
+                categoryId, null, "Market", null, null
         );
     }
 
@@ -281,7 +292,7 @@ class FinancialTransactionServiceTest {
                                                    TransactionType type, UUID categoryId) {
         return new UpdateTransactionRequest(
                 targetAccountId, new BigDecimal(amount), transactionDate, "Updated", type,
-                categoryId, null, null, null
+                categoryId, null, null, null, null
         );
     }
 }

@@ -5,6 +5,9 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -13,7 +16,15 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Entity
 @Table(name = "financial_transaction")
@@ -30,6 +41,9 @@ public class FinancialTransaction {
 
     @Column(name = "category_id")
     private UUID categoryId;
+
+    @Column(name = "transfer_id")
+    private UUID transferId;
 
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
@@ -62,6 +76,10 @@ public class FinancialTransaction {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @OneToMany(mappedBy = "transaction", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("position ASC")
+    private List<TransactionSplit> splits = new ArrayList<>();
+
     protected FinancialTransaction() {
     }
 
@@ -72,6 +90,21 @@ public class FinancialTransaction {
         this.ownerId = ownerId;
         replace(accountId, categoryId, amount, type, transactionDate, description,
                 merchantPayee, notes, externalReference);
+    }
+
+    static FinancialTransaction transferLeg(UUID id, UUID transferId, UUID ownerId, UUID accountId,
+                                            BigDecimal amount, TransactionType type,
+                                            LocalDate transactionDate, String description,
+                                            String notes, String externalReference) {
+        if (!type.isTransfer()) {
+            throw new IllegalArgumentException("A transfer leg requires a transfer transaction type");
+        }
+        FinancialTransaction leg = new FinancialTransaction(
+                id, ownerId, accountId, null, amount, type, transactionDate,
+                description, null, notes, externalReference
+        );
+        leg.transferId = transferId;
+        return leg;
     }
 
     @PrePersist
@@ -98,6 +131,47 @@ public class FinancialTransaction {
         this.merchantPayee = normalizeOptional(merchantPayee);
         this.notes = normalizeOptional(notes);
         this.externalReference = normalizeOptional(externalReference);
+    }
+
+    void replaceTransferLeg(UUID accountId, BigDecimal amount, TransactionType type,
+                            LocalDate transactionDate, String description, String notes,
+                            String externalReference) {
+        if (!type.isTransfer()) {
+            throw new IllegalArgumentException("A transfer leg requires a transfer transaction type");
+        }
+        this.accountId = accountId;
+        this.categoryId = null;
+        this.amount = amount;
+        this.type = type;
+        this.transactionDate = transactionDate;
+        this.description = description.trim();
+        this.merchantPayee = null;
+        this.notes = normalizeOptional(notes);
+        this.externalReference = normalizeOptional(externalReference);
+    }
+
+    void replaceSplits(List<SplitReplacement> replacements) {
+        Map<UUID, TransactionSplit> existingById = new HashMap<>();
+        splits.forEach(split -> existingById.put(split.getId(), split));
+
+        Set<UUID> retainedIds = replacements.stream()
+                .map(SplitReplacement::id)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        splits.removeIf(split -> !retainedIds.contains(split.getId()));
+
+        for (int position = 0; position < replacements.size(); position++) {
+            SplitReplacement replacement = replacements.get(position);
+            TransactionSplit split = replacement.id() == null
+                    ? new TransactionSplit(UUID.randomUUID(), this, replacement.categoryId(),
+                    replacement.amount(), position)
+                    : existingById.get(replacement.id());
+            split.replace(replacement.categoryId(), replacement.amount(), position);
+            if (replacement.id() == null) {
+                splits.add(split);
+            }
+        }
+        splits.sort(Comparator.comparingInt(TransactionSplit::getPosition));
     }
 
     void softDelete(Instant deletedAt) {
@@ -135,6 +209,10 @@ public class FinancialTransaction {
 
     public UUID getCategoryId() {
         return categoryId;
+    }
+
+    public UUID getTransferId() {
+        return transferId;
     }
 
     public BigDecimal getAmount() {
@@ -177,7 +255,14 @@ public class FinancialTransaction {
         return updatedAt;
     }
 
+    public List<TransactionSplit> getSplits() {
+        return List.copyOf(splits);
+    }
+
     public TransactionStatus getStatus() {
         return deletedAt == null ? TransactionStatus.ACTIVE : TransactionStatus.DELETED;
+    }
+
+    record SplitReplacement(UUID id, UUID categoryId, BigDecimal amount) {
     }
 }
