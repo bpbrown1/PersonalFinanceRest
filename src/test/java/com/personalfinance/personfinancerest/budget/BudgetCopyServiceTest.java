@@ -146,6 +146,61 @@ class BudgetCopyServiceTest {
         assertThat(copied.totalPlanned()).isEqualTo(new BigDecimal("0.00"));
     }
 
+    @Test
+    void usesReviewedLinesAsCompleteOrderedTargetWithoutInspectingOmittedSourceLines() {
+        Budget source = source();
+        UUID omittedArchivedCategory = UUID.randomUUID();
+        source.addLine(omittedArchivedCategory, new BigDecimal("50.00"));
+        UUID added = eligibleCategory();
+        UUID retained = eligibleCategory();
+        source.addLine(retained, new BigDecimal("100.00"));
+        CopyBudgetRequest reviewed = new CopyBudgetRequest("2028-02", List.of(
+                new CreateBudgetLineRequest(retained, new BigDecimal("125.50")),
+                new CreateBudgetLineRequest(added, new BigDecimal("25.00"))
+        ));
+        when(repository.saveAndFlush(any(Budget.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        BudgetResponse copied = service.copy(source.getId(), reviewed);
+
+        assertThat(copied.lines()).extracting(BudgetLineResponse::categoryId)
+                .containsExactly(retained, added);
+        assertThat(copied.lines()).extracting(BudgetLineResponse::plannedAmount)
+                .containsExactly(new BigDecimal("125.50"), new BigDecimal("25.00"));
+        assertThat(copied.lines()).extracting(BudgetLineResponse::position).containsExactly(0, 1);
+        assertThat(copied.totalPlanned()).isEqualTo(new BigDecimal("150.50"));
+        verify(categories, never()).findByIdAndOwnerId(omittedArchivedCategory, ownerId);
+        assertThat(source.getLines()).extracting(BudgetLine::getPlannedAmount)
+                .containsExactly(new BigDecimal("50.00"), new BigDecimal("100.00"));
+    }
+
+    @Test
+    void explicitEmptyReviewedLinesCreateAnEmptyTarget() {
+        Budget source = source();
+        source.addLine(eligibleCategory(), new BigDecimal("100.00"));
+        when(repository.saveAndFlush(any(Budget.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        BudgetResponse copied = service.copy(source.getId(), new CopyBudgetRequest("2028-02", List.of()));
+
+        assertThat(copied.lines()).isEmpty();
+        assertThat(copied.totalPlanned()).isEqualTo(new BigDecimal("0.00"));
+        verifyNoInteractions(categories);
+    }
+
+    @Test
+    void rejectsDuplicateReviewedCategoriesBeforeSaving() {
+        Budget source = source();
+        UUID category = UUID.randomUUID();
+        CopyBudgetRequest reviewed = new CopyBudgetRequest("2028-02", List.of(
+                new CreateBudgetLineRequest(category, BigDecimal.ONE),
+                new CreateBudgetLineRequest(category, BigDecimal.TEN)
+        ));
+
+        assertThatThrownBy(() -> service.copy(source.getId(), reviewed))
+                .isInstanceOf(InvalidBudgetRequestException.class);
+        verifyNoInteractions(categories);
+        verify(repository, never()).saveAndFlush(any());
+    }
+
     private Budget source() {
         Budget source = new Budget(UUID.randomUUID(), ownerId, "Monthly plan", "USD",
                 LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31));

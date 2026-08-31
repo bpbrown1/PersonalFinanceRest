@@ -309,11 +309,25 @@ Budget and line IDs remain stable, and responses include lifecycle timestamps pl
 {"targetMonth": "2026-09"}
 ```
 
+To copy a reviewed draft instead of the source lines, submit the complete ordered target set:
+
+```json
+{
+  "targetMonth": "2026-09",
+  "lines": [
+    {"categoryId": "30000000-0000-0000-0000-000000000004", "plannedAmount": 200.00},
+    {"categoryId": "30000000-0000-0000-0000-000000000001", "plannedAmount": 550.00}
+  ]
+}
+```
+
 `targetMonth` must use `YYYY-MM` with a valid month and a year from 0001 through 9999. The server derives the complete calendar period, including leap days. Success returns `201 Created`, a `Location` header, and the normal budget response.
 
-An active or archived owned budget can be a source. The copy retains its name, currency, and active lines' category IDs, exact planned amounts, and relative order. Positions are compacted to start at zero. Budget and line IDs and timestamps are new, lifecycle states are active, and version starts at zero. Archived lines are omitted. The source is not modified; subsequent edits to either budget are independent. Actual spending is not copied: progress uses the target month's own transactions.
+An active or archived owned budget can be a source. When `lines` is omitted or `null`, the copy retains its name, currency, and active lines' category IDs, exact planned amounts, and relative order. Supplying `lines` instead treats them as the complete reviewed target set, so categories can be added, removed, reordered, or assigned new planned amounts without changing the source. An explicit empty array creates an empty target budget. Reviewed lines contain only `categoryId` and `plannedAmount`; source line IDs are never accepted or copied.
 
-Copied lines are new associations, so all their categories must currently be owned, active, and expense-compatible. An active source line referencing an archived or income-only category rejects the whole copy with `409`; missing or foreign resources return `404`. Restore or correct the source category/line explicitly instead of silently dropping planned spending. Archived source lines are skipped before category validation.
+Positions are compacted to start at zero. Budget and line IDs and timestamps are new, lifecycle states are active, and version starts at zero. Archived source lines are omitted only for the fallback copy; reviewed lines replace the fallback entirely. The source is not modified, subsequent edits to either budget are independent, and actual spending is not copied: progress uses the target month's own transactions.
+
+Copied lines are new associations, so all effective target categories must be unique, currently owned, active, and expense-compatible, and planned amounts must be non-negative with at most two decimals. Validation errors for reviewed values use indexed paths such as `lines[0].plannedAmount`. With fallback behavior, an active source line referencing an archived or income-only category rejects the whole copy with `409`; a reviewed draft can remediate that source by omitting or replacing the invalid line. Missing or foreign resources return `404`. Archived source lines are skipped before fallback validation.
 
 A copy is rejected if any budget already exists for this owner in the target month, including archived budgets, other currencies, and the source itself. The `409` response keeps the normal error envelope and adds `existingBudgetId` for navigation. If several existing budgets occupy the month, the earliest created (then lowest ID) is returned. Invalid month input returns `400` with a `targetMonth` field error.
 

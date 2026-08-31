@@ -121,6 +121,21 @@ class DevelopmentDataIT {
                 .andExpect(jsonPath("$.totalPlanned").value(700.75))
                 .andExpect(jsonPath("$.lines.length()").value(2));
         mockMvc.perform(post(source + "/copy").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"targetMonth":"2026-10","lines":[
+                                  {"categoryId":"30000000-0000-0000-0000-000000000004","plannedAmount":200.00},
+                                  {"categoryId":"30000000-0000-0000-0000-000000000001","plannedAmount":550.00}
+                                ]}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.totalPlanned").value(750.0))
+                .andExpect(jsonPath("$.lines[0].categoryId")
+                        .value("30000000-0000-0000-0000-000000000004"))
+                .andExpect(jsonPath("$.lines[0].position").value(0))
+                .andExpect(jsonPath("$.lines[1].categoryId")
+                        .value("30000000-0000-0000-0000-000000000001"))
+                .andExpect(jsonPath("$.lines[1].position").value(1));
+        mockMvc.perform(post(source + "/copy").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"targetMonth\":\"2026-08\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.existingBudgetId").value("70000000-0000-0000-0000-000000000001"));
