@@ -14,6 +14,9 @@ public record BudgetProgressResponse(
         UUID accountId,
         UUID categoryId,
         BigDecimal planned,
+        BigDecimal committed,
+        BigDecimal remainingAfterCommitments,
+        boolean underfunded,
         BigDecimal budgetedActual,
         BigDecimal unbudgetedActual,
         BigDecimal totalActual,
@@ -21,6 +24,7 @@ public record BudgetProgressResponse(
         BigDecimal percentageUsed,
         List<BudgetLineProgressResponse> lines,
         List<UnbudgetedProgressResponse> unbudgeted,
+        List<UnbudgetedCommitmentResponse> unbudgetedCommitments,
         BudgetProgressDrillDown drillDown
 ) {
 }

@@ -20,7 +20,7 @@ Activate the `dev` Spring profile to start the in-memory H2 database with repres
 SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 ```
 
-The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, same-currency and cross-currency transfers, and monthly budgets with active and archived lines. An archived July plan is available as a copy source; August is already occupied and September is initially free. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
+The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, same-currency and cross-currency transfers, monthly budgets, and monthly, semiannual, yearly, and archived recurring expenses. An archived July plan is available as a copy source; August is already occupied and September is initially free. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
 
 Production migrations remain in `db/migration`; sample data must stay under `dev/db/migration`. When a feature adds required tables, relationships, or useful frontend states, update the development seed and `DevelopmentDataIT` together. The fixed seed UUIDs should remain stable unless a relationship is intentionally replaced.
 
@@ -279,6 +279,33 @@ Retrieve active transaction totals grouped by account currency with:
 
 Balance snapshots and transaction-driven balance changes currently share the account's `currentBalance` projection. A newly effective snapshot sets the observed balance; subsequent transaction changes apply deltas. Full automatic reconciliation between the ledger and observed snapshots is intentionally deferred to the dedicated reconciliation story.
 
+## Recurring expense contract
+
+Create a recurring bill or subscription with `POST /api/v1/recurring-expenses`:
+
+```json
+{
+  "name": "Auto insurance",
+  "amount": 720.00,
+  "currency": "USD",
+  "categoryId": "30000000-0000-0000-0000-000000000009",
+  "accountId": "10000000-0000-0000-0000-000000000001",
+  "anchorDate": "2026-02-15",
+  "endDate": null,
+  "intervalMonths": 6
+}
+```
+
+The positive `intervalMonths` supports monthly (`1`), quarterly (`3`), semiannual (`6`), yearly (`12`), and other month-based cadences. Each due date is derived from the original anchor; an unavailable day clamps to that month's final day without causing later occurrences to drift. Amounts use fixed two-decimal arithmetic, currency uses the supported ISO catalog, category is required and expense-compatible, and account is optional but must use the same currency.
+
+- `GET /api/v1/recurring-expenses?status=active|archived|all` lists owned definitions.
+- `GET /api/v1/recurring-expenses/{id}` retrieves one definition.
+- `PUT /api/v1/recurring-expenses/{id}` replaces editable terms.
+- `POST /api/v1/recurring-expenses/{id}/archive|restore` changes lifecycle idempotently.
+- `GET /api/v1/recurring-expenses/occurrences?from=2026-08-01&to=2026-08-31` returns inclusive, chronological forecast occurrences.
+
+Archived definitions retain occurrences due through their archive date and stop projecting later ones. Updating a definition recomputes forecasts because individual occurrences are not persisted in this version. Projections never create ledger transactions or indicate that a bill was paid; occurrence overrides, reminders, payment matching, and automatic transactions are intentionally deferred.
+
 ## Budget contract
 
 Create a monthly budget with `POST /api/v1/budgets`:
@@ -341,7 +368,7 @@ Copied lines are new associations, so all effective target categories must be un
 
 A copy is rejected if any budget already exists for this owner in the target month, including archived budgets, other currencies, and the source itself. The `409` response keeps the normal error envelope and adds `existingBudgetId` for navigation. If several existing budgets occupy the month, the earliest created (then lowest ID) is returned. Invalid month input returns `400` with a `targetMonth` field error.
 
-Create, copy, and metadata-update transactions use an owner-row database lock to coordinate month checks and writes, including concurrent copies from different sources. The check and complete copy commit atomically. This is a copy-specific precondition, not a new global uniqueness rule: ordinary create/update endpoints retain their existing multiple-budget-per-month behavior. No schema migration or automatic recurring generation is introduced.
+Create, copy, and metadata-update transactions use an owner-row database lock to coordinate month checks and writes, including concurrent copies from different sources. The check and complete copy commit atomically. This is a copy-specific precondition, not a new global uniqueness rule: ordinary create/update endpoints retain their existing multiple-budget-per-month behavior. Copying a budget does not create or duplicate recurring-expense definitions.
 
 Development example: copy archived source `70000000-0000-0000-0000-000000000002` to `2026-09`, or select `2026-08` to exercise the existing-budget conflict.
 
@@ -356,6 +383,9 @@ An abridged progress response is shaped for both summary cards and line-item dri
   "startDate": "2026-08-01",
   "endDate": "2026-08-31",
   "planned": 800.00,
+  "committed": 929.99,
+  "remainingAfterCommitments": -129.99,
+  "underfunded": true,
   "budgetedActual": 153.65,
   "unbudgetedActual": 35.00,
   "totalActual": 188.65,
@@ -366,6 +396,10 @@ An abridged progress response is shaped for both summary cards and line-item dri
       "lineId": "71000000-0000-0000-0000-000000000001",
       "categoryId": "30000000-0000-0000-0000-000000000001",
       "planned": 600.00,
+      "committed": 0.00,
+      "remainingAfterCommitments": 600.00,
+      "underfunded": false,
+      "scheduledCommitments": [],
       "actual": 153.65,
       "remaining": 446.35,
       "percentageUsed": 25.61,
@@ -381,6 +415,13 @@ An abridged progress response is shaped for both summary cards and line-item dri
         ],
         "transactionsPath": "/api/v1/budgets/70000000-0000-0000-0000-000000000001/progress/transactions?scope=line&lineId=71000000-0000-0000-0000-000000000001"
       }
+    }
+  ],
+  "unbudgetedCommitments": [
+    {
+      "categoryId": "30000000-0000-0000-0000-000000000008",
+      "committed": 209.99,
+      "scheduledCommitments": ["..."]
     }
   ],
   "unbudgeted": [

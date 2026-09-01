@@ -3,6 +3,7 @@ package com.personalfinance.personfinancerest.account.management;
 import com.personalfinance.personfinancerest.account.balance.BalanceSnapshotRepository;
 import com.personalfinance.personfinancerest.user.CurrentUserProvider;
 import com.personalfinance.personfinancerest.transaction.FinancialTransactionRepository;
+import com.personalfinance.personfinancerest.recurringexpense.RecurringExpenseRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,8 +55,12 @@ class FinancialAccountApiIT {
     @Autowired
     private FinancialTransactionRepository transactionRepository;
 
+    @Autowired
+    private RecurringExpenseRepository recurringExpenseRepository;
+
     @BeforeEach
     void clearAccounts() {
+        recurringExpenseRepository.deleteAll();
         transactionRepository.deleteAll();
         snapshotRepository.deleteAll();
         repository.deleteAll();

@@ -24,6 +24,10 @@ import com.personalfinance.personfinancerest.transaction.InvalidTransactionAlloc
 import com.personalfinance.personfinancerest.transaction.TransactionConflictException;
 import com.personalfinance.personfinancerest.transaction.TransactionNotFoundException;
 import com.personalfinance.personfinancerest.transaction.TransferNotFoundException;
+import com.personalfinance.personfinancerest.recurringexpense.InvalidRecurringExpenseRequestException;
+import com.personalfinance.personfinancerest.recurringexpense.InvalidRecurringExpenseStatusException;
+import com.personalfinance.personfinancerest.recurringexpense.RecurringExpenseConflictException;
+import com.personalfinance.personfinancerest.recurringexpense.RecurringExpenseNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -110,6 +114,14 @@ class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
 
+    @ExceptionHandler(RecurringExpenseConflictException.class)
+    ResponseEntity<ApiError> handleRecurringExpenseConflict(RecurringExpenseConflictException exception) {
+        ApiError response = new ApiError(
+                Instant.now(), HttpStatus.CONFLICT.value(), exception.getMessage(), Map.of()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
     @ExceptionHandler(BudgetTargetMonthConflictException.class)
     ResponseEntity<ApiError> handleBudgetTargetMonthConflict(BudgetTargetMonthConflictException exception) {
         ApiError response = new ApiError(Instant.now(), HttpStatus.CONFLICT.value(),
@@ -139,6 +151,16 @@ class ApiExceptionHandler {
 
     @ExceptionHandler(InvalidBudgetRequestException.class)
     ResponseEntity<ApiError> handleInvalidBudgetRequest(InvalidBudgetRequestException exception) {
+        return badRequest("Validation failed", exception.getFieldErrors());
+    }
+
+    @ExceptionHandler(InvalidRecurringExpenseStatusException.class)
+    ResponseEntity<ApiError> handleInvalidRecurringExpenseStatus(InvalidRecurringExpenseStatusException exception) {
+        return badRequest("Validation failed", Map.of("status", exception.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidRecurringExpenseRequestException.class)
+    ResponseEntity<ApiError> handleInvalidRecurringExpenseRequest(InvalidRecurringExpenseRequestException exception) {
         return badRequest("Validation failed", exception.getFieldErrors());
     }
 
@@ -189,6 +211,14 @@ class ApiExceptionHandler {
 
     @ExceptionHandler({BudgetNotFoundException.class, BudgetLineNotFoundException.class})
     ResponseEntity<ApiError> handleBudgetNotFound(RuntimeException exception) {
+        ApiError response = new ApiError(
+                Instant.now(), HttpStatus.NOT_FOUND.value(), exception.getMessage(), Map.of()
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+    }
+
+    @ExceptionHandler(RecurringExpenseNotFoundException.class)
+    ResponseEntity<ApiError> handleRecurringExpenseNotFound(RecurringExpenseNotFoundException exception) {
         ApiError response = new ApiError(
                 Instant.now(), HttpStatus.NOT_FOUND.value(), exception.getMessage(), Map.of()
         );

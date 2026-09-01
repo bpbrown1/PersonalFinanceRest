@@ -49,6 +49,7 @@ class TransferApiIT {
 
     @BeforeEach
     void clearLedger() {
+        jdbcTemplate.update("DELETE FROM recurring_expense");
         jdbcTemplate.update("DELETE FROM budget_line");
         jdbcTemplate.update("DELETE FROM budget");
         transactionRepository.deleteAll();

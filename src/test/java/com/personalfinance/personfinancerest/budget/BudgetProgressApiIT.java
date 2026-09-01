@@ -41,6 +41,7 @@ class BudgetProgressApiIT {
 
     @BeforeEach
     void setUp() {
+        jdbcTemplate.update("DELETE FROM recurring_expense");
         jdbcTemplate.update("DELETE FROM transaction_split");
         jdbcTemplate.update("DELETE FROM financial_transaction");
         jdbcTemplate.update("DELETE FROM budget_line");
