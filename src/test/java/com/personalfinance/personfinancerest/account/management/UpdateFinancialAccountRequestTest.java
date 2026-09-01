@@ -57,11 +57,20 @@ class UpdateFinancialAccountRequestTest {
     @Test
     void identifiesFinancialTermChanges() {
         UpdateFinancialAccountRequest request = new UpdateFinancialAccountRequest(
-                null, null, "USD", null, null
+                null, null, "usd", null, null
         );
 
         assertThat(validator.validate(request)).isEmpty();
         assertThat(request.changesFinancialTerms()).isTrue();
+    }
+
+    @Test
+    void rejectsAWithdrawnCurrencyCode() {
+        UpdateFinancialAccountRequest request = new UpdateFinancialAccountRequest(
+                null, null, "BGN", null, null
+        );
+
+        assertThat(invalidProperties(request)).containsExactly("currency");
     }
 
     private Set<String> invalidProperties(UpdateFinancialAccountRequest request) {

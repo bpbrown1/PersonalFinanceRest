@@ -15,6 +15,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -111,6 +112,47 @@ class FinancialAccountApiIT {
 
         assertThat(repository.findAll().getFirst().getOpeningBalance())
                 .isEqualByComparingTo(new BigDecimal("0.00"));
+    }
+
+    @Test
+    void listsTheSupportedAccountCurrenciesInStableOrder() throws Exception {
+        String response = mockMvc.perform(get("/api/v1/accounts/currencies"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(155))
+                .andExpect(jsonPath("$[0]").value("AED"))
+                .andExpect(jsonPath("$[154]").value("ZWG"))
+                .andReturn().getResponse().getContentAsString();
+
+        List<String> codes = objectMapper.readValue(
+                response,
+                objectMapper.getTypeFactory().constructCollectionType(List.class, String.class)
+        );
+        assertThat(codes)
+                .isSorted()
+                .contains("EUR", "USD", "XCG")
+                .doesNotContain("BGN", "XAU", "XTS", "XXX", "USN");
+    }
+
+    @Test
+    void rejectsUnsupportedAndWithdrawnAccountCurrencies() throws Exception {
+        for (String currency : List.of("ZZZ", "BGN", "XAU", "XXX")) {
+            mockMvc.perform(post("/api/v1/accounts")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "name": "Invalid currency",
+                                      "type": "checking",
+                                      "currency": "%s",
+                                      "openingDate": "2026-08-20"
+                                    }
+                                    """.formatted(currency)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("Validation failed"))
+                    .andExpect(jsonPath("$.fieldErrors.currency")
+                            .value("must be a supported ISO 4217 currency code"));
+        }
+
+        assertThat(repository.count()).isZero();
     }
 
     @Test
@@ -220,6 +262,20 @@ class FinancialAccountApiIT {
                 .andExpect(jsonPath("$.fieldErrors.name").exists())
                 .andExpect(jsonPath("$.fieldErrors.currency").exists())
                 .andExpect(jsonPath("$.fieldErrors.openingBalance").exists());
+    }
+
+    @Test
+    void rejectsAnUnsupportedCurrencyUpdate() throws Exception {
+        UUID accountId = createAccount("Everyday Checking", "checking");
+
+        mockMvc.perform(patch("/api/v1/accounts/{accountId}", accountId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currency\": \"BGN\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.currency")
+                        .value("must be a supported ISO 4217 currency code"));
+
+        assertThat(repository.findById(accountId).orElseThrow().getCurrency()).isEqualTo("USD");
     }
 
     @Test
