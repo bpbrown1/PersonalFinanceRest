@@ -1,6 +1,7 @@
 package com.personalfinance.personfinancerest.account.management;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.personalfinance.personfinancerest.account.currency.SupportedCurrency;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Pattern;
@@ -12,7 +13,7 @@ import java.time.LocalDate;
 public record UpdateFinancialAccountRequest(
         @Pattern(regexp = "(?s).*\\S.*", message = "must not be blank") @Size(max = 100) String name,
         AccountType type,
-        @Pattern(regexp = "(?i)[A-Z]{3}", message = "must be a three-letter currency code") String currency,
+        @SupportedCurrency String currency,
         LocalDate openingDate,
         @Digits(integer = 17, fraction = 2) BigDecimal openingBalance
 ) {

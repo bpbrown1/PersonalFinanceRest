@@ -50,6 +50,16 @@ Do not use wildcard origins in a deployed environment.
 
 `openingBalance` is optional and defaults to `0.00`. Supported account types are `checking`, `savings`, `cash`, `credit_card`, and `loan`.
 
+Account currency is validated case-insensitively against the application's explicit current ISO 4217 allowlist and is stored in uppercase. Retrieve the same stable alphabetical list used by validation with:
+
+`GET /api/v1/accounts/currencies`
+
+```json
+["AED", "AFN", "ALL", "...", "USD", "...", "ZWG"]
+```
+
+The checked-in snapshot is sourced from SIX Financial Information's **List One: Current Currency & Funds**, published 2026-01-01. The product admits current circulating currencies and excludes fund/unit identifiers, precious metals, `XTS` testing, and `XXX` no-currency values. Withdrawn codes such as `BGN` are rejected. Updating the list requires reviewing the latest SIX amendments, replacing `reference/supported-account-currencies.txt`, retaining alphabetical uniqueness, updating the published date, and running the catalog plus account API tests. Runtime validation never depends on an external network call.
+
 A successful request returns `201 Created`, a `Location` header, and the created account:
 
 ```json
@@ -417,7 +427,7 @@ All documented API errors use this shape:
   "status": 400,
   "error": "Validation failed",
   "fieldErrors": {
-    "currency": "must be a three-letter currency code"
+    "currency": "must be a supported ISO 4217 currency code"
   }
 }
 ```
