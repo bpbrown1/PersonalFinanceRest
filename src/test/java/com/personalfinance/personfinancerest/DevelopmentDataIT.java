@@ -33,7 +33,19 @@ class DevelopmentDataIT {
 
         mockMvc.perform(get("/api/v1/categories").queryParam("status", "all"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(7));
+                .andExpect(jsonPath("$.length()").value(9));
+
+        mockMvc.perform(get("/api/v1/recurring-expenses").queryParam("status", "all"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(4))
+                .andExpect(jsonPath("$[?(@.name == 'Home internet')].intervalMonths")
+                        .value(org.hamcrest.Matchers.contains(1)))
+                .andExpect(jsonPath("$[?(@.name == 'Auto insurance')].intervalMonths")
+                        .value(org.hamcrest.Matchers.contains(6)))
+                .andExpect(jsonPath("$[?(@.name == 'Annual software subscription')].intervalMonths")
+                        .value(org.hamcrest.Matchers.contains(12)))
+                .andExpect(jsonPath("$[?(@.name == 'Former gym membership')].status")
+                        .value(org.hamcrest.Matchers.contains("archived")));
 
         mockMvc.perform(get("/api/v1/transactions").queryParam("status", "all"))
                 .andExpect(status().isOk())
@@ -87,6 +99,8 @@ class DevelopmentDataIT {
         mockMvc.perform(get("/api/v1/budgets/70000000-0000-0000-0000-000000000001/progress"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.planned").value(800.0))
+                .andExpect(jsonPath("$.committed").value(929.99))
+                .andExpect(jsonPath("$.unbudgetedCommitments.length()").value(2))
                 .andExpect(jsonPath("$.budgetedActual").value(153.65))
                 .andExpect(jsonPath("$.unbudgetedActual").value(35.0))
                 .andExpect(jsonPath("$.totalActual").value(188.65));

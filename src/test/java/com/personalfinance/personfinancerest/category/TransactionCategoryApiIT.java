@@ -49,6 +49,7 @@ class TransactionCategoryApiIT {
 
     @BeforeEach
     void clearCategories() {
+        jdbcTemplate.update("DELETE FROM recurring_expense");
         jdbcTemplate.update("DELETE FROM budget_line");
         jdbcTemplate.update("DELETE FROM budget");
         jdbcTemplate.update("DELETE FROM transaction_split");

@@ -23,9 +23,11 @@ class BudgetProgressServiceTest {
     private final FinancialAccountRepository accountRepository = mock(FinancialAccountRepository.class);
     private final TransactionCategoryRepository categoryRepository = mock(TransactionCategoryRepository.class);
     private final BudgetSpendingSource spendingSource = mock(BudgetSpendingSource.class);
+    private final BudgetCommitmentSource commitmentSource = mock(BudgetCommitmentSource.class);
     private final CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
     private final BudgetProgressService service = new BudgetProgressService(
-            budgetRepository, accountRepository, categoryRepository, spendingSource, currentUserProvider
+            budgetRepository, accountRepository, categoryRepository, spendingSource, commitmentSource,
+            currentUserProvider
     );
 
     private final UUID ownerId = UUID.randomUUID();
@@ -38,6 +40,11 @@ class BudgetProgressServiceTest {
     @BeforeEach
     void setUp() {
         when(currentUserProvider.userId()).thenReturn(ownerId);
+        when(commitmentSource.findScheduledCommitments(
+                org.mockito.ArgumentMatchers.eq(ownerId), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.nullable(UUID.class)
+        )).thenReturn(List.of());
     }
 
     @Test
@@ -116,6 +123,50 @@ class BudgetProgressServiceTest {
         assertThat(response.remaining()).isEqualByComparingTo("-3.00");
     }
 
+    @Test
+    void keepsRecurringCommitmentsSeparateFromActualsAndGroupsThemByBudgetLine() {
+        Budget budget = new Budget(
+                budgetId, ownerId, "August", "USD",
+                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31)
+        );
+        BudgetLine parentLine = budget.addLine(parentId, amount("50.00"));
+        TransactionCategory parent = category(parentId, null);
+        TransactionCategory child = category(childId, parentId);
+        TransactionCategory unbudgeted = category(unbudgetedId, null);
+        when(budgetRepository.findByIdAndOwnerId(budgetId, ownerId)).thenReturn(Optional.of(budget));
+        when(categoryRepository.findAllByOwnerIdOrderByNormalizedNameAsc(ownerId))
+                .thenReturn(List.of(parent, child, unbudgeted));
+        when(spendingSource.findExpenseAllocations(
+                ownerId, "USD", budget.getStartDate(), budget.getEndDate(), null
+        )).thenReturn(List.of());
+        when(commitmentSource.findScheduledCommitments(
+                ownerId, "USD", budget.getStartDate(), budget.getEndDate(), null
+        )).thenReturn(List.of(
+                commitment(childId, "Rent", "40.00", LocalDate.of(2026, 8, 1)),
+                commitment(childId, "Streaming", "15.00", LocalDate.of(2026, 8, 5)),
+                commitment(unbudgetedId, "Insurance", "20.00", LocalDate.of(2026, 8, 15))
+        ));
+
+        BudgetProgressResponse response = service.calculate(budgetId, null, null);
+
+        assertThat(response.committed()).isEqualByComparingTo("75.00");
+        assertThat(response.remainingAfterCommitments()).isEqualByComparingTo("-25.00");
+        assertThat(response.underfunded()).isTrue();
+        assertThat(response.totalActual()).isEqualByComparingTo("0.00");
+        assertThat(response.lines()).singleElement().satisfies(line -> {
+            assertThat(line.lineId()).isEqualTo(parentLine.getId());
+            assertThat(line.committed()).isEqualByComparingTo("55.00");
+            assertThat(line.remainingAfterCommitments()).isEqualByComparingTo("-5.00");
+            assertThat(line.underfunded()).isTrue();
+            assertThat(line.scheduledCommitments()).extracting(BudgetScheduledCommitment::name)
+                    .containsExactly("Rent", "Streaming");
+        });
+        assertThat(response.unbudgetedCommitments()).singleElement().satisfies(row -> {
+            assertThat(row.categoryId()).isEqualTo(unbudgetedId);
+            assertThat(row.committed()).isEqualByComparingTo("20.00");
+        });
+    }
+
     private TransactionCategory category(UUID id, UUID parentId) {
         TransactionCategory category = mock(TransactionCategory.class);
         when(category.getId()).thenReturn(id);
@@ -125,6 +176,14 @@ class BudgetProgressServiceTest {
 
     private BudgetSpendingAllocation allocation(UUID transactionId, UUID categoryId, String amount) {
         return new BudgetSpendingAllocation(transactionId, UUID.randomUUID(), categoryId, amount(amount));
+    }
+
+    private BudgetScheduledCommitment commitment(UUID categoryId, String name, String amount, LocalDate dueDate) {
+        UUID recurringExpenseId = UUID.randomUUID();
+        return new BudgetScheduledCommitment(
+                recurringExpenseId + ":" + dueDate, recurringExpenseId, name, dueDate,
+                amount(amount), "USD", categoryId, null
+        );
     }
 
     private BigDecimal amount(String value) {
