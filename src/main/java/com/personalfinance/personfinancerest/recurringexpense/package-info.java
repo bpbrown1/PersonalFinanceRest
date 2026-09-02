@@ -1,4 +1,4 @@
 /**
- * Owner-scoped recurring bill definitions and deterministic forecast occurrence projection.
+ * Owner-scoped recurring bill definitions, deterministic projections, and explicit transaction matching.
  */
 package com.personalfinance.personfinancerest.recurringexpense;

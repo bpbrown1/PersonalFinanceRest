@@ -105,12 +105,17 @@ class BudgetProgressService {
             MutableProgress progress = lineProgress.get(line.getId());
             MutableCommitments scheduled = lineCommitments.get(line.getId());
             BigDecimal planned = line.getPlannedAmount();
+            BigDecimal totalBudgeted = planned.add(scheduled.total);
+            BigDecimal projectedUsage = progress.actual.add(scheduled.outstanding);
             Set<UUID> categoryIds = descendants(line.getCategoryId(), parentByCategory);
             return new BudgetLineProgressResponse(
                     line.getId(), line.getCategoryId(), line.getPosition(), planned,
-                    scheduled.total, planned.subtract(scheduled.total), scheduled.total.compareTo(planned) > 0,
+                    scheduled.total, scheduled.total, scheduled.outstanding, totalBudgeted,
+                    planned.subtract(scheduled.total), scheduled.total.compareTo(planned) > 0,
                     List.copyOf(scheduled.items), progress.actual,
-                    planned.subtract(progress.actual), percentage(progress.actual, planned),
+                    totalBudgeted.subtract(progress.actual), percentage(progress.actual, totalBudgeted),
+                    percentage(progress.actual, totalBudgeted), projectedUsage,
+                    totalBudgeted.subtract(projectedUsage), percentage(projectedUsage, totalBudgeted),
                     drillDown(budget, accountId, categoryIds, progress.transactionIds,
                             "line", line.getId(), null, false)
             );
@@ -118,9 +123,19 @@ class BudgetProgressService {
 
         List<UnbudgetedCommitmentResponse> unbudgetedCommitmentRows = unbudgetedCommitments.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey(Comparator.comparing(UUID::toString)))
-                .map(entry -> new UnbudgetedCommitmentResponse(
-                        entry.getKey(), entry.getValue().total, List.copyOf(entry.getValue().items)
-                )).toList();
+                .map(entry -> {
+                    MutableCommitments scheduled = entry.getValue();
+                    MutableProgress progress = unbudgeted.getOrDefault(entry.getKey(), new MutableProgress());
+                    BigDecimal totalBudgeted = scheduled.total;
+                    BigDecimal projectedUsage = progress.actual.add(scheduled.outstanding);
+                    return new UnbudgetedCommitmentResponse(
+                            entry.getKey(), scheduled.total, scheduled.total, scheduled.outstanding,
+                            totalBudgeted, progress.actual, totalBudgeted.subtract(progress.actual),
+                            percentage(progress.actual, totalBudgeted), projectedUsage,
+                            totalBudgeted.subtract(projectedUsage), percentage(projectedUsage, totalBudgeted),
+                            List.copyOf(scheduled.items)
+                    );
+                }).toList();
 
         List<UnbudgetedProgressResponse> unbudgetedRows = unbudgeted.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey(Comparator.nullsLast(Comparator.comparing(UUID::toString))))
@@ -135,11 +150,15 @@ class BudgetProgressService {
         BigDecimal planned = activeLines.stream().map(BudgetLine::getPlannedAmount).reduce(ZERO, BigDecimal::add);
         BigDecimal committed = commitments.stream()
                 .map(BudgetScheduledCommitment::amount).reduce(ZERO, BigDecimal::add);
+        BigDecimal outstandingCommitted = commitments.stream()
+                .map(BudgetScheduledCommitment::outstandingAmount).reduce(ZERO, BigDecimal::add);
         BigDecimal budgetedActual = lineProgress.values().stream()
                 .map(progress -> progress.actual).reduce(ZERO, BigDecimal::add);
         BigDecimal unbudgetedActual = unbudgeted.values().stream()
                 .map(progress -> progress.actual).reduce(ZERO, BigDecimal::add);
         BigDecimal totalActual = budgetedActual.add(unbudgetedActual);
+        BigDecimal totalBudgeted = planned.add(committed);
+        BigDecimal projectedUsage = totalActual.add(outstandingCommitted);
         LinkedHashSet<UUID> allTransactionIds = new LinkedHashSet<>();
         allocations.stream()
                 .filter(allocation -> filterCategoryIds == null || filterCategoryIds.contains(allocation.categoryId()))
@@ -148,9 +167,13 @@ class BudgetProgressService {
 
         return new BudgetProgressResponse(
                 budget.getId(), ownerId, budget.getCurrency(), budget.getStartDate(), budget.getEndDate(),
-                accountId, categoryId, planned, committed, planned.subtract(committed),
+                accountId, categoryId, planned, committed, committed, outstandingCommitted, totalBudgeted,
+                planned.subtract(committed),
                 committed.compareTo(planned) > 0, budgetedActual, unbudgetedActual, totalActual,
-                planned.subtract(totalActual), percentage(totalActual, planned), lines, unbudgetedRows,
+                totalBudgeted.subtract(totalActual), percentage(totalActual, totalBudgeted),
+                percentage(totalActual, totalBudgeted), projectedUsage,
+                totalBudgeted.subtract(projectedUsage), percentage(projectedUsage, totalBudgeted),
+                lines, unbudgetedRows,
                 unbudgetedCommitmentRows,
                 drillDown(budget, accountId,
                         filterCategoryIds == null ? Set.of() : filterCategoryIds, allTransactionIds,
@@ -255,10 +278,12 @@ class BudgetProgressService {
 
     private static final class MutableCommitments {
         private BigDecimal total = ZERO;
+        private BigDecimal outstanding = ZERO;
         private final List<BudgetScheduledCommitment> items = new ArrayList<>();
 
         private void add(BudgetScheduledCommitment commitment) {
             total = total.add(commitment.amount());
+            outstanding = outstanding.add(commitment.outstandingAmount());
             items.add(commitment);
         }
     }

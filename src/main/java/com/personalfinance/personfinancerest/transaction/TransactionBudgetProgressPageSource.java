@@ -1,6 +1,7 @@
 package com.personalfinance.personfinancerest.transaction;
 
 import com.personalfinance.personfinancerest.budget.BudgetProgressTransactionPageSource;
+import com.personalfinance.personfinancerest.recurringexpense.RecurringExpenseMatchingService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
@@ -12,9 +13,12 @@ import java.util.UUID;
 class TransactionBudgetProgressPageSource implements BudgetProgressTransactionPageSource {
 
     private final FinancialTransactionRepository repository;
+    private final RecurringExpenseMatchingService matchingService;
 
-    TransactionBudgetProgressPageSource(FinancialTransactionRepository repository) {
+    TransactionBudgetProgressPageSource(FinancialTransactionRepository repository,
+                                        RecurringExpenseMatchingService matchingService) {
         this.repository = repository;
+        this.matchingService = matchingService;
     }
 
     @Override
@@ -38,6 +42,8 @@ class TransactionBudgetProgressPageSource implements BudgetProgressTransactionPa
                                 .and((root, query, builder) -> root.get("id").in(transactionIds)),
                         pageRequest
                 );
-        return TransactionPageResponse.from(result, criteria);
+        return TransactionPageResponse.from(result, criteria,
+                matchingService.referencesForTransactions(
+                        ownerId, result.getContent().stream().map(FinancialTransaction::getId).toList()));
     }
 }

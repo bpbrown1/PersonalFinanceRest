@@ -16,6 +16,7 @@ import java.util.UUID;
 
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -41,6 +42,7 @@ class RecurringExpenseApiIT {
 
     @BeforeEach
     void setUp() {
+        jdbc.update("DELETE FROM recurring_expense_match");
         jdbc.update("DELETE FROM recurring_expense");
         jdbc.update("DELETE FROM transaction_split");
         jdbc.update("DELETE FROM financial_transaction");
@@ -182,6 +184,168 @@ class RecurringExpenseApiIT {
     }
 
     @Test
+    void explicitlyLinksReplacesAndUnlinksAnOccurrence() throws Exception {
+        UUID recurringId = insertRecurring(
+                "Water", "80.00", childCategoryId, accountId, "2026-01-15", 1);
+        UUID firstTransaction = insertTransaction(
+                ownerId, accountId, childCategoryId, "72.00", "EXPENSE", "2026-08-14", null);
+        UUID replacementTransaction = insertTransaction(
+                ownerId, accountId, childCategoryId, "78.50", "EXPENSE", "2026-08-16", null);
+
+        mockMvc.perform(post("/api/v1/recurring-expenses/{id}/occurrences/{dueDate}/match",
+                        recurringId, "2026-08-15")
+                        .contentType("application/json")
+                        .content("{\"transactionId\":\"" + firstTransaction + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("satisfied"))
+                .andExpect(jsonPath("$.targetAmount").value(80.0))
+                .andExpect(jsonPath("$.actualAmount").value(72.0))
+                .andExpect(jsonPath("$.variance").value(8.0))
+                .andExpect(jsonPath("$.linkedTransaction.id").value(firstTransaction.toString()));
+
+        mockMvc.perform(post("/api/v1/recurring-expenses/{id}/occurrences/{dueDate}/match",
+                        recurringId, "2026-08-15")
+                        .contentType("application/json")
+                        .content("{\"transactionId\":\"" + firstTransaction + "\"}"))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(put("/api/v1/recurring-expenses/{id}/occurrences/{dueDate}/match",
+                        recurringId, "2026-08-15")
+                        .contentType("application/json")
+                        .content("{\"transactionId\":\"" + replacementTransaction + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.actualAmount").value(78.5))
+                .andExpect(jsonPath("$.variance").value(1.5))
+                .andExpect(jsonPath("$.linkedTransaction.id").value(replacementTransaction.toString()));
+        mockMvc.perform(get("/api/v1/transactions/{id}", firstTransaction))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recurringExpenseOccurrence").doesNotExist());
+        mockMvc.perform(get("/api/v1/transactions/{id}", replacementTransaction))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recurringExpenseOccurrence.occurrenceKey")
+                        .value(recurringId + ":2026-08-15"));
+
+        mockMvc.perform(delete("/api/v1/recurring-expenses/{id}/occurrences/{dueDate}/match",
+                        recurringId, "2026-08-15"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("outstanding"))
+                .andExpect(jsonPath("$.actualAmount").doesNotExist())
+                .andExpect(jsonPath("$.linkedTransaction").doesNotExist());
+
+        String updateWithOccurrence = """
+                {"accountId":"%s","amount":78.50,"transactionDate":"2026-08-16",
+                 "description":"Updated recurring payment","type":"EXPENSE","categoryId":"%s",
+                 "recurringExpenseOccurrence":{"recurringExpenseId":"%s","dueDate":"2026-08-15"}}
+                """.formatted(accountId, childCategoryId, recurringId);
+        mockMvc.perform(put("/api/v1/transactions/{id}", replacementTransaction)
+                        .contentType("application/json").content(updateWithOccurrence))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recurringExpenseOccurrence.occurrenceKey")
+                        .value(recurringId + ":2026-08-15"));
+        mockMvc.perform(put("/api/v1/transactions/{id}", replacementTransaction)
+                        .contentType("application/json")
+                        .content("""
+                                {"accountId":"%s","amount":78.50,"transactionDate":"2026-08-16",
+                                 "description":"Unlinked recurring payment","type":"EXPENSE","categoryId":"%s"}
+                                """.formatted(accountId, childCategoryId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recurringExpenseOccurrence").doesNotExist());
+    }
+
+    @Test
+    void transactionSelectionRetainsDeletedMatchAndRevalidatesRestore() throws Exception {
+        UUID recurringId = insertRecurring(
+                "Internet", "89.99", childCategoryId, accountId, "2026-01-31", 1);
+        String transactionRequest = """
+                {"accountId":"%s","amount":84.99,"transactionDate":"2026-08-31",
+                 "description":"August internet","type":"EXPENSE","categoryId":"%s",
+                 "recurringExpenseOccurrence":{"recurringExpenseId":"%s","dueDate":"2026-08-31"}}
+                """.formatted(accountId, childCategoryId, recurringId);
+
+        mockMvc.perform(post("/api/v1/transactions")
+                        .contentType("application/json").content(transactionRequest))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.recurringExpenseOccurrence.occurrenceKey")
+                        .value(recurringId + ":2026-08-31"));
+        UUID transactionId = jdbc.queryForObject(
+                "SELECT id FROM financial_transaction WHERE description = 'August internet'", UUID.class);
+
+        mockMvc.perform(delete("/api/v1/transactions/{id}", transactionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("deleted"))
+                .andExpect(jsonPath("$.recurringExpenseOccurrence.recurringExpenseId")
+                        .value(recurringId.toString()));
+        mockMvc.perform(get("/api/v1/recurring-expenses/occurrences")
+                        .queryParam("from", "2026-08-31").queryParam("to", "2026-08-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("outstanding"))
+                .andExpect(jsonPath("$[0].linkedTransaction.active").value(false));
+
+        mockMvc.perform(post("/api/v1/transactions/{id}/restore", transactionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("active"));
+        mockMvc.perform(put("/api/v1/recurring-expenses/{id}", recurringId)
+                        .contentType("application/json")
+                        .content(request("Internet", "89.99", "USD", childCategoryId, accountId,
+                                "2026-01-30", null, 1)))
+                .andExpect(status().isConflict());
+        mockMvc.perform(delete("/api/v1/transactions/{id}", transactionId))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/recurring-expenses/{id}/archive", recurringId))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/transactions/{id}/restore", transactionId))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void rejectsInvalidOccurrenceAndIncompatibleTransactionsWithoutPersistingCreate() throws Exception {
+        UUID recurringId = insertRecurring(
+                "Water", "80.00", childCategoryId, accountId, "2026-01-15", 1);
+        UUID wrongCategoryTransaction = insertTransaction(
+                ownerId, accountId, otherCategoryId, "80.00", "EXPENSE", "2026-08-15", null);
+        UUID otherUsdAccount = insertAccount(ownerId, "USD");
+        UUID wrongAccountTransaction = insertTransaction(
+                ownerId, otherUsdAccount, childCategoryId, "80.00", "EXPENSE", "2026-08-15", null);
+        UUID incomeTransaction = insertTransaction(
+                ownerId, accountId, childCategoryId, "80.00", "INCOME", "2026-08-15", null);
+        UUID deletedTransaction = insertTransaction(
+                ownerId, accountId, childCategoryId, "80.00", "EXPENSE", "2026-08-15",
+                "2026-08-16 00:00:00");
+
+        mockMvc.perform(post("/api/v1/recurring-expenses/{id}/occurrences/{dueDate}/match",
+                        recurringId, "2026-08-14")
+                        .contentType("application/json")
+                        .content("{\"transactionId\":\"" + wrongCategoryTransaction + "\"}"))
+                .andExpect(status().isConflict());
+        mockMvc.perform(post("/api/v1/recurring-expenses/{id}/occurrences/{dueDate}/match",
+                        recurringId, "2026-08-15")
+                        .contentType("application/json")
+                        .content("{\"transactionId\":\"" + wrongCategoryTransaction + "\"}"))
+                .andExpect(status().isConflict());
+        for (UUID incompatible : java.util.List.of(
+                wrongAccountTransaction, incomeTransaction, deletedTransaction)) {
+            mockMvc.perform(post("/api/v1/recurring-expenses/{id}/occurrences/{dueDate}/match",
+                            recurringId, "2026-08-15")
+                            .contentType("application/json")
+                            .content("{\"transactionId\":\"" + incompatible + "\"}"))
+                    .andExpect(status().isConflict());
+        }
+
+        long before = jdbc.queryForObject("SELECT COUNT(*) FROM financial_transaction", Long.class);
+        mockMvc.perform(post("/api/v1/transactions")
+                        .contentType("application/json")
+                        .content("""
+                                {"accountId":"%s","amount":80.00,"transactionDate":"2026-08-15",
+                                 "description":"Wrong category","type":"EXPENSE","categoryId":"%s",
+                                 "recurringExpenseOccurrence":{"recurringExpenseId":"%s","dueDate":"2026-08-15"}}
+                                """.formatted(accountId, otherCategoryId, recurringId)))
+                .andExpect(status().isConflict());
+        org.assertj.core.api.Assertions.assertThat(
+                jdbc.queryForObject("SELECT COUNT(*) FROM financial_transaction", Long.class))
+                .isEqualTo(before);
+    }
+
+    @Test
     void exposesCategoryCommitmentsWithoutChangingBudgetPlansOrActuals() throws Exception {
         UUID budgetId = UUID.randomUUID();
         UUID lineId = UUID.randomUUID();
@@ -197,9 +361,16 @@ class RecurringExpenseApiIT {
                 (id, budget_id, category_id, planned_amount, position, archived_at, created_at, updated_at)
                 VALUES (?, ?, ?, 50.00, 0, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """, lineId, budgetId, categoryId);
-        insertRecurring("Power", "65.00", childCategoryId, accountId, "2026-01-31", 1);
+        UUID power = insertRecurring("Power", "65.00", childCategoryId, accountId, "2026-01-31", 1);
         insertRecurring("Insurance", "20.00", otherCategoryId, null, "2026-02-15", 6);
         insertRecurring("Euro bill", "999.00", otherCategoryId, euroAccountId, "2026-02-15", 6, "EUR");
+        UUID powerTransaction = insertTransaction(
+                ownerId, accountId, childCategoryId, "60.00", "EXPENSE", "2026-08-31", null);
+        jdbc.update("""
+                INSERT INTO recurring_expense_match
+                (id, owner_id, recurring_expense_id, due_date, transaction_id, created_at, updated_at)
+                VALUES (?, ?, ?, DATE '2026-08-31', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), ownerId, power, powerTransaction);
 
         mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress", budgetId))
                 .andExpect(status().isOk())
@@ -207,10 +378,23 @@ class RecurringExpenseApiIT {
                 .andExpect(jsonPath("$.committed").value(85.0))
                 .andExpect(jsonPath("$.remainingAfterCommitments").value(-35.0))
                 .andExpect(jsonPath("$.underfunded").value(true))
-                .andExpect(jsonPath("$.totalActual").value(0.0))
+                .andExpect(jsonPath("$.scheduledTarget").value(85.0))
+                .andExpect(jsonPath("$.outstandingScheduledTarget").value(20.0))
+                .andExpect(jsonPath("$.totalBudgeted").value(135.0))
+                .andExpect(jsonPath("$.totalActual").value(60.0))
+                .andExpect(jsonPath("$.remaining").value(75.0))
+                .andExpect(jsonPath("$.percentSpent").value(44.44))
+                .andExpect(jsonPath("$.projectedUsage").value(80.0))
+                .andExpect(jsonPath("$.projectedRemaining").value(55.0))
+                .andExpect(jsonPath("$.projectedPercentage").value(59.26))
                 .andExpect(jsonPath("$.lines[0].lineId").value(lineId.toString()))
                 .andExpect(jsonPath("$.lines[0].planned").value(50.0))
                 .andExpect(jsonPath("$.lines[0].committed").value(65.0))
+                .andExpect(jsonPath("$.lines[0].outstandingScheduledTarget").value(0.0))
+                .andExpect(jsonPath("$.lines[0].totalBudgeted").value(115.0))
+                .andExpect(jsonPath("$.lines[0].actual").value(60.0))
+                .andExpect(jsonPath("$.lines[0].projectedUsage").value(60.0))
+                .andExpect(jsonPath("$.lines[0].scheduledCommitments[0].satisfied").value(true))
                 .andExpect(jsonPath("$.lines[0].scheduledCommitments[0].name").value("Power"))
                 .andExpect(jsonPath("$.unbudgetedCommitments[0].categoryId")
                         .value(otherCategoryId.toString()))
@@ -257,20 +441,37 @@ class RecurringExpenseApiIT {
         return id;
     }
 
-    private void insertRecurring(String name, String amount, UUID category, UUID account,
+    private UUID insertRecurring(String name, String amount, UUID category, UUID account,
                                  String anchor, int interval) {
-        insertRecurring(name, amount, category, account, anchor, interval, "USD");
+        return insertRecurring(name, amount, category, account, anchor, interval, "USD");
     }
 
-    private void insertRecurring(String name, String amount, UUID category, UUID account,
+    private UUID insertRecurring(String name, String amount, UUID category, UUID account,
                                  String anchor, int interval, String currency) {
+        UUID id = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO recurring_expense
                 (id, owner_id, name, amount, currency, category_id, account_id, anchor_date,
                  end_date, interval_months, archived_at, version, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS DATE), NULL, ?, NULL, 0,
                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """, UUID.randomUUID(), ownerId, name, new BigDecimal(amount), currency,
+                """, id, ownerId, name, new BigDecimal(amount), currency,
                 category, account, anchor, interval);
+        return id;
+    }
+
+    private UUID insertTransaction(UUID transactionOwner, UUID account, UUID category, String amount,
+                                   String type, String date, String deletedAt) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO financial_transaction
+                (id, owner_id, account_id, category_id, amount, type, transaction_date, description,
+                 merchant_payee, notes, external_reference, deleted_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CAST(? AS DATE), 'Recurring payment', NULL, NULL, NULL,
+                        CASE WHEN ? IS NULL THEN NULL ELSE CAST(? AS TIMESTAMP) END,
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, id, transactionOwner, account, category, new BigDecimal(amount), type, date,
+                deletedAt, deletedAt);
+        return id;
     }
 }

@@ -9,6 +9,8 @@ import com.personalfinance.personfinancerest.category.CategoryStatus;
 import com.personalfinance.personfinancerest.category.TransactionCategory;
 import com.personalfinance.personfinancerest.category.TransactionCategoryRepository;
 import com.personalfinance.personfinancerest.user.CurrentUserProvider;
+import com.personalfinance.personfinancerest.recurringexpense.RecurringExpenseMatchingService;
+import com.personalfinance.personfinancerest.recurringexpense.RecurringExpenseTransactionSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,6 +50,12 @@ class FinancialTransactionServiceTest {
     @Mock
     private CurrentUserProvider currentUserProvider;
 
+    @Mock
+    private RecurringExpenseMatchingService recurringExpenseMatchingService;
+
+    @Mock
+    private RecurringExpenseTransactionSource recurringExpenseTransactionSource;
+
     private FinancialTransactionService service;
     private UUID ownerId;
     private UUID accountId;
@@ -59,7 +67,8 @@ class FinancialTransactionServiceTest {
     @BeforeEach
     void setUp() {
         service = new FinancialTransactionService(
-                repository, accountRepository, categoryRepository, currentUserProvider
+                repository, accountRepository, categoryRepository, recurringExpenseMatchingService,
+                recurringExpenseTransactionSource, currentUserProvider
         );
         ownerId = UUID.randomUUID();
         accountId = UUID.randomUUID();

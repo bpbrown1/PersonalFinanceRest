@@ -31,17 +31,20 @@ class RecurringExpenseService {
     private final TransactionCategoryRepository categoryRepository;
     private final FinancialAccountRepository accountRepository;
     private final RecurringExpenseOccurrenceProjector projector;
+    private final RecurringExpenseMatchingService matchingService;
     private final CurrentUserProvider currentUserProvider;
 
     RecurringExpenseService(RecurringExpenseRepository repository,
                             TransactionCategoryRepository categoryRepository,
                             FinancialAccountRepository accountRepository,
                             RecurringExpenseOccurrenceProjector projector,
+                            RecurringExpenseMatchingService matchingService,
                             CurrentUserProvider currentUserProvider) {
         this.repository = repository;
         this.categoryRepository = categoryRepository;
         this.accountRepository = accountRepository;
         this.projector = projector;
+        this.matchingService = matchingService;
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -85,6 +88,7 @@ class RecurringExpenseService {
         validateAssociations(expense.getOwnerId(), request.categoryId(), request.accountId(), currency, expense);
         expense.replace(request.name(), amount, currency, request.categoryId(), request.accountId(),
                 request.anchorDate(), request.endDate(), request.intervalMonths());
+        matchingService.validateExistingMatches(expense);
         return RecurringExpenseResponse.from(save(expense));
     }
 
@@ -117,22 +121,28 @@ class RecurringExpenseService {
     @Transactional(readOnly = true)
     List<ProjectedOccurrence> project(UUID ownerId, String currency, LocalDate from, LocalDate to, UUID accountId) {
         validateRange(from, to);
-        return repository.findAllByOwnerIdOrderByNameAscIdAsc(ownerId).stream()
+        List<RecurringExpense> expenses = repository.findAllByOwnerIdOrderByNameAscIdAsc(ownerId).stream()
                 .filter(expense -> currency == null || expense.getCurrency().equalsIgnoreCase(currency))
                 .filter(expense -> accountId == null || accountId.equals(expense.getAccountId()))
+                .toList();
+        Map<RecurringExpenseMatchingService.OccurrenceIdentity,
+                RecurringExpenseMatchingService.MatchDetails> matches = matchingService.matches(
+                ownerId, expenses.stream().map(RecurringExpense::getId).toList(), from, to);
+        return expenses.stream()
                 .flatMap(expense -> projector.dueDates(expense, from, to).stream()
-                        .map(dueDate -> projected(expense, dueDate)))
+                        .map(dueDate -> projected(expense, dueDate, matches.get(
+                                new RecurringExpenseMatchingService.OccurrenceIdentity(
+                                        expense.getId(), dueDate)))))
                 .sorted(Comparator.comparing((ProjectedOccurrence occurrence) -> occurrence.response.dueDate())
                         .thenComparing(occurrence -> occurrence.response.name())
                         .thenComparing(occurrence -> occurrence.response.recurringExpenseId()))
                 .toList();
     }
 
-    private ProjectedOccurrence projected(RecurringExpense expense, LocalDate dueDate) {
-        RecurringExpenseOccurrenceResponse response = new RecurringExpenseOccurrenceResponse(
-                expense.getId() + ":" + dueDate, expense.getId(), expense.getName(), dueDate,
-                expense.getAmount(), expense.getCurrency(), expense.getCategoryId(), expense.getAccountId()
-        );
+    private ProjectedOccurrence projected(
+            RecurringExpense expense, LocalDate dueDate,
+            RecurringExpenseMatchingService.MatchDetails details) {
+        RecurringExpenseOccurrenceResponse response = matchingService.response(expense, dueDate, details);
         return new ProjectedOccurrence(response);
     }
 

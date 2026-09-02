@@ -48,6 +48,7 @@ class BudgetCopyApiIT {
 
     @BeforeEach
     void clearData() {
+        jdbc.update("DELETE FROM recurring_expense_match");
         jdbc.update("DELETE FROM recurring_expense");
         jdbc.update("DELETE FROM transaction_split");
         jdbc.update("DELETE FROM financial_transaction");

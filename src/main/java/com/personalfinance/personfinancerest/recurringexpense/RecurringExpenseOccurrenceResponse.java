@@ -10,6 +10,11 @@ public record RecurringExpenseOccurrenceResponse(
         String name,
         LocalDate dueDate,
         BigDecimal amount,
+        BigDecimal targetAmount,
+        BigDecimal actualAmount,
+        BigDecimal variance,
+        RecurringExpenseOccurrenceStatus status,
+        RecurringExpenseLinkedTransactionResponse linkedTransaction,
         String currency,
         UUID categoryId,
         UUID accountId

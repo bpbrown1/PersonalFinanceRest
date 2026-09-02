@@ -3,6 +3,7 @@ package com.personalfinance.personfinancerest.recurringexpense;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -21,9 +22,12 @@ import java.util.UUID;
 class RecurringExpenseController {
 
     private final RecurringExpenseService service;
+    private final RecurringExpenseMatchingService matchingService;
 
-    RecurringExpenseController(RecurringExpenseService service) {
+    RecurringExpenseController(RecurringExpenseService service,
+                               RecurringExpenseMatchingService matchingService) {
         this.service = service;
+        this.matchingService = matchingService;
     }
 
     @PostMapping
@@ -62,5 +66,25 @@ class RecurringExpenseController {
     @PostMapping("/{id}/restore")
     RecurringExpenseResponse restore(@PathVariable UUID id) {
         return service.restore(id);
+    }
+
+    @PostMapping("/{id}/occurrences/{dueDate}/match")
+    RecurringExpenseOccurrenceResponse link(@PathVariable UUID id,
+                                            @PathVariable LocalDate dueDate,
+                                            @Valid @RequestBody MatchRecurringExpenseRequest request) {
+        return matchingService.link(id, dueDate, request.transactionId(), false);
+    }
+
+    @PutMapping("/{id}/occurrences/{dueDate}/match")
+    RecurringExpenseOccurrenceResponse replaceMatch(@PathVariable UUID id,
+                                                    @PathVariable LocalDate dueDate,
+                                                    @Valid @RequestBody MatchRecurringExpenseRequest request) {
+        return matchingService.link(id, dueDate, request.transactionId(), true);
+    }
+
+    @DeleteMapping("/{id}/occurrences/{dueDate}/match")
+    RecurringExpenseOccurrenceResponse unlink(@PathVariable UUID id,
+                                              @PathVariable LocalDate dueDate) {
+        return matchingService.unlink(id, dueDate);
     }
 }
