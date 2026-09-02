@@ -6,6 +6,7 @@ import com.personalfinance.personfinancerest.user.CurrentUserProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -29,6 +30,9 @@ class FinancialAccountService {
 
     @Transactional
     FinancialAccountResponse create(CreateFinancialAccountRequest request) {
+        BigDecimal interestRate = AccountInterestTerms.validateAndNormalize(
+                request.type(), request.interestRate(), request.interestRateType()
+        );
         FinancialAccount account = new FinancialAccount(
                 UUID.randomUUID(),
                 currentUserProvider.userId(),
@@ -36,7 +40,9 @@ class FinancialAccountService {
                 request.type(),
                 MoneyValues.currencyCode(request.currency()),
                 request.openingDate(),
-                MoneyValues.amountOrZero(request.openingBalance())
+                MoneyValues.amountOrZero(request.openingBalance()),
+                interestRate,
+                request.interestRateType()
         );
 
         FinancialAccount savedAccount = repository.saveAndFlush(account);
@@ -72,14 +78,29 @@ class FinancialAccountService {
             throw new FinancialAccountInUseException(accountId);
         }
 
+        if (request.hasInterestRateField() != request.hasInterestRateTypeField()) {
+            throw new InvalidFinancialAccountRequestException(java.util.Map.of(
+                    "interestRate", "must be updated together with interestRateType",
+                    "interestRateType", "must be updated together with interestRate"
+            ));
+        }
+        AccountType type = request.type() == null ? account.getType() : request.type();
+        BigDecimal interestRate = request.hasInterestRateField()
+                ? request.interestRate() : account.getInterestRate();
+        InterestRateType interestRateType = request.hasInterestRateTypeField()
+                ? request.interestRateType() : account.getInterestRateType();
+        interestRate = AccountInterestTerms.validateAndNormalize(type, interestRate, interestRateType);
+
         account.update(
                 request.name() == null ? account.getName() : request.name().trim(),
-                request.type() == null ? account.getType() : request.type(),
+                type,
                 request.currency() == null ? account.getCurrency() : MoneyValues.currencyCode(request.currency()),
                 request.openingDate() == null ? account.getOpeningDate() : request.openingDate(),
                 request.openingBalance() == null
                         ? account.getOpeningBalance()
-                        : MoneyValues.amountOrZero(request.openingBalance())
+                        : MoneyValues.amountOrZero(request.openingBalance()),
+                interestRate,
+                interestRateType
         );
         if (request.openingBalance() != null) {
             account.recordCurrentBalance(account.getOpeningBalance());

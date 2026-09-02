@@ -75,13 +75,18 @@ class FinancialAccountServiceTest {
                 AccountType.CHECKING,
                 "usd",
                 LocalDate.of(2026, 8, 20),
-                null
+                null,
+                new BigDecimal("4.25"),
+                InterestRateType.APY
         ));
 
         assertThat(response.ownerId()).isEqualTo(ownerId);
         assertThat(response.name()).isEqualTo("Everyday Checking");
         assertThat(response.currency()).isEqualTo("USD");
         assertThat(response.openingBalance()).isEqualByComparingTo("0.00");
+        assertThat(response.classification()).isEqualTo(AccountClassification.ASSET);
+        assertThat(response.interestRate()).isEqualByComparingTo("4.250000");
+        assertThat(response.interestRateType()).isEqualTo(InterestRateType.APY);
         verify(openingBalanceHistory).createFor(any(FinancialAccount.class));
     }
 
@@ -165,6 +170,36 @@ class FinancialAccountServiceTest {
         )))
                 .isInstanceOf(FinancialAccountInUseException.class)
                 .hasMessageContaining(accountId.toString());
+
+        verify(repository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void updatesInformationalInterestTermsWithoutCheckingAccountActivity() {
+        givenOwnedAccount();
+        given(repository.saveAndFlush(account)).willReturn(account);
+
+        FinancialAccountResponse response = service.update(accountId, new UpdateFinancialAccountRequest(
+                null, null, null, null, null, new BigDecimal("3.5"), InterestRateType.APY
+        ));
+
+        assertThat(response.interestRate()).isEqualByComparingTo("3.500000");
+        assertThat(response.interestRateType()).isEqualTo(InterestRateType.APY);
+        assertThat(response.currentBalance()).isEqualByComparingTo("1250.75");
+        verifyNoInteractions(financialAccountActivity);
+    }
+
+    @Test
+    void rejectsATypeChangeThatWouldInvalidateExistingInterestTerms() {
+        account.update(
+                account.getName(), account.getType(), account.getCurrency(), account.getOpeningDate(),
+                account.getOpeningBalance(), new BigDecimal("3.500000"), InterestRateType.APY
+        );
+        givenOwnedAccount();
+
+        assertThatThrownBy(() -> service.update(accountId, new UpdateFinancialAccountRequest(
+                null, AccountType.LOAN, null, null, null
+        ))).isInstanceOf(InvalidFinancialAccountRequestException.class);
 
         verify(repository, never()).saveAndFlush(any());
     }

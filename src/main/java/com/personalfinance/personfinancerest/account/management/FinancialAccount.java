@@ -44,6 +44,13 @@ public class FinancialAccount {
     @Column(name = "current_balance", nullable = false, precision = 19, scale = 2)
     private BigDecimal currentBalance;
 
+    @Column(name = "interest_rate", precision = 9, scale = 6)
+    private BigDecimal interestRate;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "interest_rate_type", length = 3)
+    private InterestRateType interestRateType;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -58,6 +65,12 @@ public class FinancialAccount {
 
     public FinancialAccount(UUID id, UUID ownerId, String name, AccountType type, String currency,
                             LocalDate openingDate, BigDecimal openingBalance) {
+        this(id, ownerId, name, type, currency, openingDate, openingBalance, null, null);
+    }
+
+    public FinancialAccount(UUID id, UUID ownerId, String name, AccountType type, String currency,
+                            LocalDate openingDate, BigDecimal openingBalance,
+                            BigDecimal interestRate, InterestRateType interestRateType) {
         this.id = id;
         this.ownerId = ownerId;
         this.name = name;
@@ -66,6 +79,8 @@ public class FinancialAccount {
         this.openingDate = openingDate;
         this.openingBalance = openingBalance;
         this.currentBalance = openingBalance;
+        this.interestRate = interestRate;
+        this.interestRateType = interestRateType;
     }
 
     @PrePersist
@@ -112,6 +127,14 @@ public class FinancialAccount {
         return currentBalance;
     }
 
+    public BigDecimal getInterestRate() {
+        return interestRate;
+    }
+
+    public InterestRateType getInterestRateType() {
+        return interestRateType;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }
@@ -129,11 +152,19 @@ public class FinancialAccount {
     }
 
     void update(String name, AccountType type, String currency, LocalDate openingDate, BigDecimal openingBalance) {
+        update(name, type, currency, openingDate, openingBalance, interestRate, interestRateType);
+    }
+
+    void update(String name, AccountType type, String currency, LocalDate openingDate,
+                BigDecimal openingBalance, BigDecimal interestRate,
+                InterestRateType interestRateType) {
         this.name = name;
         this.type = type;
         this.currency = currency;
         this.openingDate = openingDate;
         this.openingBalance = openingBalance;
+        this.interestRate = interestRate;
+        this.interestRateType = interestRateType;
     }
 
     void archive(Instant archivedAt) {

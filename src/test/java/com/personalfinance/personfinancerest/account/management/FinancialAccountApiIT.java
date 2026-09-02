@@ -76,7 +76,9 @@ class FinancialAccountApiIT {
                                   "type": "checking",
                                   "currency": "usd",
                                   "openingDate": "2026-08-20",
-                                  "openingBalance": 1250.75
+                                  "openingBalance": 1250.75,
+                                  "interestRate": 4.25,
+                                  "interestRateType": "apy"
                                 }
                                 """))
                 .andExpect(status().isCreated())
@@ -85,10 +87,13 @@ class FinancialAccountApiIT {
                 .andExpect(jsonPath("$.ownerId").value(currentUserProvider.userId().toString()))
                 .andExpect(jsonPath("$.name").value("Everyday Checking"))
                 .andExpect(jsonPath("$.type").value("checking"))
+                .andExpect(jsonPath("$.classification").value("asset"))
                 .andExpect(jsonPath("$.currency").value("USD"))
                 .andExpect(jsonPath("$.openingDate").value("2026-08-20"))
                 .andExpect(jsonPath("$.openingBalance").value(1250.75))
                 .andExpect(jsonPath("$.currentBalance").value(1250.75))
+                .andExpect(jsonPath("$.interestRate").value(4.25))
+                .andExpect(jsonPath("$.interestRateType").value("apy"))
                 .andExpect(jsonPath("$.status").value("active"))
                 .andExpect(jsonPath("$.archivedAt").isEmpty())
                 .andExpect(jsonPath("$.createdAt").isNotEmpty())
@@ -96,6 +101,8 @@ class FinancialAccountApiIT {
 
         FinancialAccount saved = repository.findAll().getFirst();
         assertThat(saved.getOpeningBalance()).isEqualByComparingTo(new BigDecimal("1250.75"));
+        assertThat(saved.getInterestRate()).isEqualByComparingTo(new BigDecimal("4.250000"));
+        assertThat(saved.getInterestRateType()).isEqualTo(InterestRateType.APY);
         assertThat(saved.getCreatedAt()).isNotNull();
         assertThat(saved.getUpdatedAt()).isNotNull();
     }
@@ -113,7 +120,10 @@ class FinancialAccountApiIT {
                                 }
                                 """))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.openingBalance").value(0.0));
+                .andExpect(jsonPath("$.openingBalance").value(0.0))
+                .andExpect(jsonPath("$.classification").value("asset"))
+                .andExpect(jsonPath("$.interestRate").isEmpty())
+                .andExpect(jsonPath("$.interestRateType").isEmpty());
 
         assertThat(repository.findAll().getFirst().getOpeningBalance())
                 .isEqualByComparingTo(new BigDecimal("0.00"));
@@ -199,6 +209,74 @@ class FinancialAccountApiIT {
                 .andExpect(jsonPath("$.error").value("Request body is malformed"));
 
         assertThat(repository.count()).isZero();
+    }
+
+    @Test
+    void derivesLiabilityClassificationAndAcceptsAprForCreditAccounts() throws Exception {
+        mockMvc.perform(post("/api/v1/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Rewards Card",
+                                  "type": "credit_card",
+                                  "currency": "USD",
+                                  "openingDate": "2026-08-20",
+                                  "interestRate": 24.99,
+                                  "interestRateType": "apr"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.classification").value("liability"))
+                .andExpect(jsonPath("$.interestRate").value(24.99))
+                .andExpect(jsonPath("$.interestRateType").value("apr"));
+    }
+
+    @Test
+    void rejectsIncompleteIncompatibleAndOverPreciseInterestTerms() throws Exception {
+        mockMvc.perform(post("/api/v1/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Incomplete Savings",
+                                  "type": "savings",
+                                  "currency": "USD",
+                                  "openingDate": "2026-08-20",
+                                  "interestRate": 4.25
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.interestRateType").exists());
+
+        mockMvc.perform(post("/api/v1/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Cash",
+                                  "type": "cash",
+                                  "currency": "USD",
+                                  "openingDate": "2026-08-20",
+                                  "interestRate": 1.0,
+                                  "interestRateType": "apy"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.interestRateType")
+                        .value("is not supported for cash accounts"));
+
+        mockMvc.perform(post("/api/v1/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Too precise",
+                                  "type": "savings",
+                                  "currency": "USD",
+                                  "openingDate": "2026-08-20",
+                                  "interestRate": 4.1234567,
+                                  "interestRateType": "apy"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.interestRate").exists());
     }
 
     @Test
@@ -307,6 +385,33 @@ class FinancialAccountApiIT {
                         .content("{\"name\": \"Renamed Checking\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("Renamed Checking"));
+
+        mockMvc.perform(patch("/api/v1/accounts/{accountId}", accountId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"interestRate\": 3.5, \"interestRateType\": \"apy\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.interestRate").value(3.5))
+                .andExpect(jsonPath("$.interestRateType").value("apy"))
+                .andExpect(jsonPath("$.currentBalance").value(1800.0));
+
+        mockMvc.perform(patch("/api/v1/accounts/{accountId}", accountId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"interestRate\": null, \"interestRateType\": null}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.interestRate").isEmpty())
+                .andExpect(jsonPath("$.interestRateType").isEmpty())
+                .andExpect(jsonPath("$.currentBalance").value(1800.0));
+    }
+
+    @Test
+    void requiresInterestTermsToBePatchedTogether() throws Exception {
+        UUID accountId = createAccount("Everyday Checking", "checking");
+
+        mockMvc.perform(patch("/api/v1/accounts/{accountId}", accountId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"interestRate\": 3.5}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.interestRateType").exists());
     }
 
     @Test
