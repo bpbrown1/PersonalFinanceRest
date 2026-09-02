@@ -16,13 +16,25 @@ public record BudgetScheduledCommitment(
         boolean satisfied,
         BigDecimal actualAmount,
         BigDecimal variance,
-        UUID linkedTransactionId
+        UUID linkedTransactionId,
+        UUID linkedTransactionAccountId,
+        LocalDate linkedTransactionDate
 ) {
     public BudgetScheduledCommitment(
             String occurrenceKey, UUID recurringExpenseId, String name, LocalDate dueDate,
             BigDecimal amount, String currency, UUID categoryId, UUID accountId) {
         this(occurrenceKey, recurringExpenseId, name, dueDate, amount, currency,
-                categoryId, accountId, false, null, null, null);
+                categoryId, accountId, false, null, null, null, null, null);
+    }
+
+    public BudgetScheduledCommitment(
+            String occurrenceKey, UUID recurringExpenseId, String name, LocalDate dueDate,
+            BigDecimal amount, String currency, UUID categoryId, UUID accountId,
+            boolean satisfied, BigDecimal actualAmount, BigDecimal variance,
+            UUID linkedTransactionId) {
+        this(occurrenceKey, recurringExpenseId, name, dueDate, amount, currency,
+                categoryId, accountId, satisfied, actualAmount, variance,
+                linkedTransactionId, null, null);
     }
 
     public BigDecimal outstandingAmount() {

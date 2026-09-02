@@ -10,6 +10,7 @@ public record UnbudgetedCommitmentResponse(
         BigDecimal scheduledTarget,
         BigDecimal outstandingScheduledTarget,
         BigDecimal totalBudgeted,
+        BigDecimal billActual,
         BigDecimal actual,
         BigDecimal remaining,
         BigDecimal percentSpent,

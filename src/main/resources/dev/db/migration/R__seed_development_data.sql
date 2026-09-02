@@ -125,7 +125,12 @@ MERGE INTO financial_transaction (
      '10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000008',
      84.99, 'EXPENSE', DATE '2026-08-31', 'August home internet',
      'Example Internet Provider', 'US-062 satisfied recurring occurrence', 'DEV-INTERNET-001', NULL,
-     DATE '2026-08-31', DATE '2026-08-31');
+     DATE '2026-08-31', DATE '2026-08-31'),
+    ('40000000-0000-0000-0000-000000000014', '00000000-0000-0000-0000-000000000001',
+     '10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000008',
+     12.00, 'EXPENSE', DATE '2026-08-22', 'One-time video rental',
+     'Example Streaming Store', 'US-063 unmatched spending remains unplanned', 'DEV-VIDEO-001', NULL,
+     DATE '2026-08-22', DATE '2026-08-22');
 
 MERGE INTO financial_transaction (
     id, owner_id, account_id, category_id, transfer_id, amount, type, transaction_date, description,

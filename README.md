@@ -20,7 +20,7 @@ Activate the `dev` Spring profile to start the in-memory H2 database with repres
 SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 ```
 
-The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, same-currency and cross-currency transfers, monthly budgets, and monthly, semiannual, yearly, and archived recurring expenses. August home internet is explicitly matched to a lower actual transaction so the UI has both satisfied and outstanding bill examples. An archived July plan is available as a copy source; August is already occupied and September is initially free. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
+The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, same-currency and cross-currency transfers, monthly budgets, and monthly, semiannual, yearly, and archived recurring expenses. August home internet is explicitly matched to a lower actual transaction, while an unrelated video rental shares its category, so the UI can demonstrate satisfied and outstanding bill components alongside correctly separated unplanned spending. An archived July plan is available as a copy source; August is already occupied and September is initially free. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
 
 Production migrations remain in `db/migration`; sample data must stay under `dev/db/migration`. When a feature adds required tables, relationships, or useful frontend states, update the development seed and `DevelopmentDataIT` together. The fixed seed UUIDs should remain stable unless a relationship is intentionally replaced.
 
@@ -396,15 +396,17 @@ An abridged progress response is shaped for both summary cards and line-item dri
   "totalBudgeted": 1729.99,
   "remainingAfterCommitments": -129.99,
   "underfunded": true,
-  "budgetedActual": 153.65,
-  "unbudgetedActual": 119.99,
-  "totalActual": 273.64,
-  "remaining": 1456.35,
-  "percentageUsed": 15.82,
-  "percentSpent": 15.82,
-  "projectedUsage": 1113.64,
-  "projectedRemaining": 616.35,
-  "projectedPercentage": 64.37,
+  "flexibleActual": 153.65,
+  "billActual": 84.99,
+  "budgetedActual": 238.64,
+  "unbudgetedActual": 47.00,
+  "totalActual": 285.64,
+  "remaining": 1444.35,
+  "percentageUsed": 16.51,
+  "percentSpent": 16.51,
+  "projectedUsage": 1125.64,
+  "projectedRemaining": 604.35,
+  "projectedPercentage": 65.07,
   "lines": [
     {
       "lineId": "71000000-0000-0000-0000-000000000001",
@@ -438,6 +440,29 @@ An abridged progress response is shaped for both summary cards and line-item dri
       }
     }
   ],
+  "components": [
+    {
+      "componentKey": "occurrence:80000000-0000-0000-0000-000000000001:2026-08-31",
+      "source": "recurring",
+      "occurrenceKey": "80000000-0000-0000-0000-000000000001:2026-08-31",
+      "recurringExpenseId": "80000000-0000-0000-0000-000000000001",
+      "categoryId": "30000000-0000-0000-0000-000000000008",
+      "name": "Home internet",
+      "dueDate": "2026-08-31",
+      "target": 89.99,
+      "actual": 84.99,
+      "remaining": 5.00,
+      "percentageUsed": 94.44,
+      "projectedUsage": 84.99,
+      "status": "satisfied",
+      "variance": 5.00,
+      "linkedTransactionId": "40000000-0000-0000-0000-000000000013",
+      "drillDown": {
+        "transactionIds": ["40000000-0000-0000-0000-000000000013"],
+        "transactionsPath": "/api/v1/budgets/70000000-0000-0000-0000-000000000001/progress/transactions?scope=component&occurrenceKey=80000000-0000-0000-0000-000000000001:2026-08-31"
+      }
+    }
+  ],
   "unbudgetedCommitments": [
     {
       "categoryId": "30000000-0000-0000-0000-000000000008",
@@ -445,12 +470,21 @@ An abridged progress response is shaped for both summary cards and line-item dri
       "scheduledTarget": 209.99,
       "outstandingScheduledTarget": 120.00,
       "totalBudgeted": 209.99,
+      "billActual": 84.99,
       "actual": 84.99,
       "projectedUsage": 204.99,
       "scheduledCommitments": ["..."]
     }
   ],
   "unbudgeted": [
+    {
+      "categoryId": "30000000-0000-0000-0000-000000000008",
+      "actual": 12.00,
+      "drillDown": {
+        "transactionIds": ["40000000-0000-0000-0000-000000000014"],
+        "transactionsPath": "/api/v1/budgets/70000000-0000-0000-0000-000000000001/progress/transactions?scope=unbudgeted&categoryId=30000000-0000-0000-0000-000000000008"
+      }
+    },
     {
       "categoryId": null,
       "actual": 35.00,
@@ -463,20 +497,23 @@ An abridged progress response is shaped for both summary cards and line-item dri
 }
 ```
 
-Budget progress is recalculated from active expense transactions in the inclusive budget period and matching account currency. Positive expenses increase actual spending; negative expense refunds reduce it. Income, transfers, soft-deleted transactions, foreign owners, other currencies, and out-of-period activity are excluded. Split rows contribute their allocated amounts rather than the parent amount.
+Budget progress is recalculated from active expense transactions and derived recurring occurrences. Flexible and unplanned spending uses active ledger activity in the inclusive budget period and matching account currency. Positive expenses increase actual spending; negative expense refunds reduce it. Income, transfers, soft-deleted transactions, foreign owners, other currencies, and out-of-period unmatched activity are excluded. Split rows contribute their allocated amounts rather than the parent amount. A recurring component belongs to the period containing its due date; when satisfied, its active linked actual replaces the target even if the payment date differs from the due date.
 
-Flexible line plans and scheduled targets are additive: `totalBudgeted = planned + scheduledTarget`. Actual spending remains ledger-derived, and `percentSpent = actual / totalBudgeted`. `projectedUsage = actual + outstandingScheduledTarget`; a satisfied occurrence contributes its actual transaction through normal spending and its target is removed from the outstanding amount, so it is never counted twice. `remaining` and `projectedRemaining` subtract actual and projected usage from total budgeted. Percentages are fixed to two decimals and remain null when total budgeted is zero. The legacy `committed`, `remainingAfterCommitments`, `underfunded`, and `percentageUsed` fields remain for compatibility; `committed` aliases scheduled target and `percentageUsed` aliases percent spent.
+Flexible line plans and scheduled targets are additive: `totalBudgeted = planned + scheduledTarget`. `flexibleActual` contains unmatched actual assigned to flexible lines, `billActual` contains satisfied recurring-component actual, `budgetedActual` is their sum, and `unbudgetedActual` contains only unrelated unplanned activity. `percentSpent = totalActual / totalBudgeted`. `projectedUsage = totalActual + outstandingScheduledTarget`; a satisfied occurrence contributes its linked actual and removes its target from the outstanding amount, so it is never counted twice. `remaining` and `projectedRemaining` subtract actual and projected usage from total budgeted. Percentages use fixed-decimal arithmetic with two decimal places and remain null when the relevant target is zero. The legacy `committed`, `remainingAfterCommitments`, `underfunded`, and `percentageUsed` fields remain for compatibility; `committed` aliases scheduled target and `percentageUsed` aliases percent spent.
 
-Only active budget lines receive progress. A line includes its category and descendants. When parent and child lines overlap, each allocation and occurrence goes to the closest matching line (then line position), preventing duplicate lines and double counting. Scheduled targets without a flexible line remain in enriched `unbudgetedCommitments` rows. Unmatched and uncategorized spending is returned in separate `unbudgeted` rows. Overall fields distinguish `budgetedActual`, `unbudgetedActual`, and `totalActual`. Negative remaining and percentages above 100 are preserved, while a zero total budget returns a null percentage. Every line and unbudgeted row includes stable contributing transaction IDs plus its date, account, category, type, and lifecycle drill-down filters.
+The top-level `components` collection is the canonical flat view. Each active flexible line produces a `source=flexible` component keyed by `line:{lineId}`. Each in-period occurrence produces a derived `source=recurring` component keyed by `occurrence:{occurrenceKey}`; no `BudgetLine` is persisted or fabricated. Recurring components expose target, actual, remaining, percentage, projected values, outstanding/satisfied state, variance, linked transaction, and an exact drill-down. A matched transaction is allocated to its bill component before flexible or unplanned classification. Consequently, an unrelated transaction in the same category remains unplanned without absorbing or duplicating the bill payment.
+
+Only active budget lines receive aggregate line progress. A line includes its category and descendants. When parent and child lines overlap, each unmatched allocation and occurrence goes to the closest matching line (then line position), preventing duplicate lines and double counting. Line responses distinguish `flexibleActual` and `billActual` while retaining `actual` as their sum. Scheduled targets without a flexible line remain in enriched `unbudgetedCommitments` rows, while unmatched and uncategorized spending remains in separate `unbudgeted` rows. Negative remaining and percentages above 100 are preserved. Every component, line, and unbudgeted row includes stable contributing transaction IDs and drill-down metadata.
 
 Each drill-down now also supplies a bookmarkable `transactionsPath`. The endpoint returns the established transaction page response and accepts `page`, `size`, `sort`, and `direction` just like transaction search. Supported scopes are:
 
 - `scope=overall`, with optional `accountId` and hierarchical `categoryId` filters.
 - `scope=line&lineId={lineId}`, with optional `accountId`.
+- `scope=component&occurrenceKey={occurrenceKey}`, with optional `accountId`, for the exact active transaction satisfying one occurrence.
 - `scope=unbudgeted&categoryId={categoryId}` for one unbudgeted category.
 - `scope=unbudgeted&uncategorized=true` for uncategorized spending.
 
-`overall` is the default scope. Every scope accepts an optional owned `accountId`; dates and currency come from the budget. Line scope requires an active `lineId` and rejects category selectors. Unbudgeted scope requires exactly one of an exact category or `uncategorized=true`.
+`overall` is the default scope. Every scope accepts an optional owned `accountId`; dates and currency come from the budget. Line scope requires an active `lineId` and rejects category selectors. Component scope requires an occurrence key and returns an empty page while the retained match is deleted or otherwise outstanding. Unbudgeted scope requires exactly one of an exact category or `uncategorized=true`.
 
 The server recomputes the selected scope from the owned budget instead of accepting transaction IDs from the client. It therefore preserves the same inclusive dates, currency, active-expense, hierarchy, split-allocation, refund, deletion, and most-specific-line rules as the progress total. A transaction appears once even when several matching allocations belong to it. Unknown or foreign budgets, lines, accounts, and categories return the established not-found errors; incompatible scope parameters return the standard validation response.
 

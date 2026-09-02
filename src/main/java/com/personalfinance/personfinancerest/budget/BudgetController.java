@@ -66,6 +66,7 @@ class BudgetController {
             @PathVariable UUID budgetId,
             @RequestParam(defaultValue = "overall") String scope,
             @RequestParam(required = false) UUID lineId,
+            @RequestParam(required = false) String occurrenceKey,
             @RequestParam(required = false) UUID accountId,
             @RequestParam(required = false) UUID categoryId,
             @RequestParam(defaultValue = "false") boolean uncategorized,
@@ -75,7 +76,8 @@ class BudgetController {
             @RequestParam(defaultValue = "desc") String direction
     ) {
         return progressTransactionService.findPage(budgetId, BudgetProgressTransactionQuery.from(
-                scope, lineId, accountId, categoryId, uncategorized, page, size, sort, direction
+                scope, lineId, occurrenceKey, accountId, categoryId,
+                uncategorized, page, size, sort, direction
         ));
     }
 

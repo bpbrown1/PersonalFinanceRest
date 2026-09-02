@@ -20,6 +20,8 @@ public record BudgetProgressResponse(
         BigDecimal totalBudgeted,
         BigDecimal remainingAfterCommitments,
         boolean underfunded,
+        BigDecimal flexibleActual,
+        BigDecimal billActual,
         BigDecimal budgetedActual,
         BigDecimal unbudgetedActual,
         BigDecimal totalActual,
@@ -30,6 +32,7 @@ public record BudgetProgressResponse(
         BigDecimal projectedRemaining,
         BigDecimal projectedPercentage,
         List<BudgetLineProgressResponse> lines,
+        List<BudgetProgressComponentResponse> components,
         List<UnbudgetedProgressResponse> unbudgeted,
         List<UnbudgetedCommitmentResponse> unbudgetedCommitments,
         BudgetProgressDrillDown drillDown

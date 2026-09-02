@@ -30,7 +30,7 @@ class BudgetProgressTransactionService {
     TransactionPageResponse findPage(UUID budgetId, BudgetProgressTransactionQuery query) {
         BudgetProgressResponse progress = switch (query.scope()) {
             case OVERALL -> progressService.calculate(budgetId, query.accountId(), query.categoryId());
-            case LINE, UNBUDGETED -> progressService.calculate(budgetId, query.accountId(), null);
+            case LINE, COMPONENT, UNBUDGETED -> progressService.calculate(budgetId, query.accountId(), null);
         };
 
         Set<UUID> transactionIds = switch (query.scope()) {
@@ -40,6 +40,12 @@ class BudgetProgressTransactionService {
                     .findFirst()
                     .map(line -> Set.copyOf(line.drillDown().transactionIds()))
                     .orElseThrow(() -> new BudgetLineNotFoundException(query.lineId()));
+            case COMPONENT -> progress.components().stream()
+                    .filter(component -> java.util.Objects.equals(
+                            component.occurrenceKey(), query.occurrenceKey()))
+                    .findFirst()
+                    .map(component -> Set.copyOf(component.drillDown().transactionIds()))
+                    .orElseGet(Set::of);
             case UNBUDGETED -> unbudgetedTransactionIds(progress, query);
         };
 

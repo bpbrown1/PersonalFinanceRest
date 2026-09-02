@@ -17,6 +17,10 @@ class BudgetProgressTransactionQueryTest {
         assertThat(query("overall", null, categoryId, false).scope())
                 .isEqualTo(BudgetProgressTransactionQuery.Scope.OVERALL);
         assertThat(query("line", lineId, null, false).lineId()).isEqualTo(lineId);
+        assertThat(BudgetProgressTransactionQuery.from(
+                "component", null, "expense:2026-08-31", null, null,
+                false, 0, 25, "date", "desc"
+        ).scope()).isEqualTo(BudgetProgressTransactionQuery.Scope.COMPONENT);
         assertThat(query("unbudgeted", null, categoryId, false).categoryId()).isEqualTo(categoryId);
         assertThat(query("unbudgeted", null, null, true).uncategorized()).isTrue();
     }
@@ -43,13 +47,20 @@ class BudgetProgressTransactionQueryTest {
                 .isInstanceOf(InvalidBudgetRequestException.class)
                 .satisfies(exception -> assertThat(((InvalidBudgetRequestException) exception).getFieldErrors())
                         .containsKey("uncategorized"));
+        assertThatThrownBy(() -> BudgetProgressTransactionQuery.from(
+                "component", null, " ", null, null,
+                false, 0, 25, "date", "desc"
+        )).isInstanceOf(InvalidBudgetRequestException.class)
+                .satisfies(exception -> assertThat(
+                        ((InvalidBudgetRequestException) exception).getFieldErrors())
+                        .containsKey("occurrenceKey"));
     }
 
     private BudgetProgressTransactionQuery query(
             String scope, UUID lineId, UUID categoryId, boolean uncategorized
     ) {
         return BudgetProgressTransactionQuery.from(
-                scope, lineId, null, categoryId, uncategorized,
+                scope, lineId, null, null, categoryId, uncategorized,
                 0, 25, "date", "desc"
         );
     }
