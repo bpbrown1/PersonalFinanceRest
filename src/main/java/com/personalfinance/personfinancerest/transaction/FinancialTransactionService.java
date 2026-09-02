@@ -11,6 +11,9 @@ import com.personalfinance.personfinancerest.category.TransactionCategory;
 import com.personalfinance.personfinancerest.category.TransactionCategoryRepository;
 import com.personalfinance.personfinancerest.shared.money.MoneyValues;
 import com.personalfinance.personfinancerest.user.CurrentUserProvider;
+import com.personalfinance.personfinancerest.recurringexpense.RecurringExpenseMatchingService;
+import com.personalfinance.personfinancerest.recurringexpense.RecurringExpenseOccurrenceReference;
+import com.personalfinance.personfinancerest.recurringexpense.RecurringExpenseTransactionSource;
 import org.springframework.stereotype.Service;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -38,15 +41,21 @@ class FinancialTransactionService {
     private final FinancialTransactionRepository repository;
     private final FinancialAccountRepository accountRepository;
     private final TransactionCategoryRepository categoryRepository;
+    private final RecurringExpenseMatchingService recurringExpenseMatchingService;
+    private final RecurringExpenseTransactionSource recurringExpenseTransactionSource;
     private final CurrentUserProvider currentUserProvider;
 
     FinancialTransactionService(FinancialTransactionRepository repository,
                                 FinancialAccountRepository accountRepository,
                                 TransactionCategoryRepository categoryRepository,
+                                RecurringExpenseMatchingService recurringExpenseMatchingService,
+                                RecurringExpenseTransactionSource recurringExpenseTransactionSource,
                                 CurrentUserProvider currentUserProvider) {
         this.repository = repository;
         this.accountRepository = accountRepository;
         this.categoryRepository = categoryRepository;
+        this.recurringExpenseMatchingService = recurringExpenseMatchingService;
+        this.recurringExpenseTransactionSource = recurringExpenseTransactionSource;
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -72,9 +81,13 @@ class FinancialTransactionService {
         );
         transaction.replaceSplits(splits);
         FinancialTransaction saved = repository.saveAndFlush(transaction);
+        RecurringExpenseOccurrenceReference occurrence = recurringExpenseMatchingService
+                .applyTransactionSelection(
+                        recurringExpenseTransactionSource.findOwned(ownerId, saved.getId()),
+                        request.recurringExpenseOccurrence(), false);
         account.applyBalanceDelta(saved.balanceImpact());
         accountRepository.saveAndFlush(account);
-        return TransactionResponse.from(saved);
+        return TransactionResponse.from(saved, occurrence);
     }
 
     @Transactional(readOnly = true)
@@ -84,12 +97,17 @@ class FinancialTransactionService {
                 FinancialTransactionSpecifications.matching(ownerId, criteria),
                 PageRequest.of(criteria.page(), criteria.size(), criteria.pageableSort())
         );
-        return TransactionPageResponse.from(result, criteria);
+        return TransactionPageResponse.from(result, criteria,
+                recurringExpenseMatchingService.referencesForTransactions(
+                        ownerId, result.getContent().stream().map(FinancialTransaction::getId).toList()));
     }
 
     @Transactional(readOnly = true)
     TransactionResponse findById(UUID transactionId) {
-        return TransactionResponse.from(findOwnedTransaction(transactionId));
+        FinancialTransaction transaction = findOwnedTransaction(transactionId);
+        return TransactionResponse.from(transaction,
+                recurringExpenseMatchingService.referenceForTransaction(
+                        transaction.getOwnerId(), transaction.getId()));
     }
 
     @Transactional(readOnly = true)
@@ -155,8 +173,12 @@ class FinancialTransactionService {
         }
 
         FinancialTransaction saved = repository.saveAndFlush(transaction);
+        RecurringExpenseOccurrenceReference occurrence = recurringExpenseMatchingService
+                .applyTransactionSelection(
+                        recurringExpenseTransactionSource.findOwned(ownerId, saved.getId()),
+                        request.recurringExpenseOccurrence(), true);
         accountRepository.saveAllAndFlush(accounts.values());
-        return TransactionResponse.from(saved);
+        return TransactionResponse.from(saved, occurrence);
     }
 
     @Transactional
@@ -171,7 +193,9 @@ class FinancialTransactionService {
             accountRepository.saveAndFlush(account);
             transaction.softDelete(Instant.now());
         }
-        return TransactionResponse.from(repository.saveAndFlush(transaction));
+        FinancialTransaction saved = repository.saveAndFlush(transaction);
+        return TransactionResponse.from(saved,
+                recurringExpenseMatchingService.referenceForTransaction(ownerId, saved.getId()));
     }
 
     @Transactional
@@ -196,11 +220,15 @@ class FinancialTransactionService {
                         ownerId, transaction.getType(), transaction.getAmount(), false
                 );
             }
+            recurringExpenseMatchingService.validateRestore(
+                    recurringExpenseTransactionSource.findOwned(ownerId, transaction.getId()));
             account.applyBalanceDelta(transaction.balanceImpact());
             accountRepository.saveAndFlush(account);
             transaction.restore();
         }
-        return TransactionResponse.from(repository.saveAndFlush(transaction));
+        FinancialTransaction saved = repository.saveAndFlush(transaction);
+        return TransactionResponse.from(saved,
+                recurringExpenseMatchingService.referenceForTransaction(ownerId, saved.getId()));
     }
 
     private FinancialTransaction findOwnedTransaction(UUID transactionId) {

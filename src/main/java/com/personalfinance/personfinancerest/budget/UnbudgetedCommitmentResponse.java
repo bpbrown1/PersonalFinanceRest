@@ -7,6 +7,15 @@ import java.util.UUID;
 public record UnbudgetedCommitmentResponse(
         UUID categoryId,
         BigDecimal committed,
+        BigDecimal scheduledTarget,
+        BigDecimal outstandingScheduledTarget,
+        BigDecimal totalBudgeted,
+        BigDecimal actual,
+        BigDecimal remaining,
+        BigDecimal percentSpent,
+        BigDecimal projectedUsage,
+        BigDecimal projectedRemaining,
+        BigDecimal projectedPercentage,
         List<BudgetScheduledCommitment> scheduledCommitments
 ) {
 }

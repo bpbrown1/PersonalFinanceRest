@@ -20,7 +20,7 @@ Activate the `dev` Spring profile to start the in-memory H2 database with repres
 SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 ```
 
-The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, same-currency and cross-currency transfers, monthly budgets, and monthly, semiannual, yearly, and archived recurring expenses. An archived July plan is available as a copy source; August is already occupied and September is initially free. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
+The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, same-currency and cross-currency transfers, monthly budgets, and monthly, semiannual, yearly, and archived recurring expenses. August home internet is explicitly matched to a lower actual transaction so the UI has both satisfied and outstanding bill examples. An archived July plan is available as a copy source; August is already occupied and September is initially free. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
 
 Production migrations remain in `db/migration`; sample data must stay under `dev/db/migration`. When a feature adds required tables, relationships, or useful frontend states, update the development seed and `DevelopmentDataIT` together. The fixed seed UUIDs should remain stable unless a relationship is intentionally replaced.
 
@@ -303,8 +303,15 @@ The positive `intervalMonths` supports monthly (`1`), quarterly (`3`), semiannua
 - `PUT /api/v1/recurring-expenses/{id}` replaces editable terms.
 - `POST /api/v1/recurring-expenses/{id}/archive|restore` changes lifecycle idempotently.
 - `GET /api/v1/recurring-expenses/occurrences?from=2026-08-01&to=2026-08-31` returns inclusive, chronological forecast occurrences.
+- `POST /api/v1/recurring-expenses/{id}/occurrences/{dueDate}/match` explicitly links one unmatched occurrence to one unmatched transaction.
+- `PUT /api/v1/recurring-expenses/{id}/occurrences/{dueDate}/match` explicitly replaces the occurrence's match.
+- `DELETE /api/v1/recurring-expenses/{id}/occurrences/{dueDate}/match` unlinks it idempotently.
 
-Archived definitions retain occurrences due through their archive date and stop projecting later ones. Updating a definition recomputes forecasts because individual occurrences are not persisted in this version. Projections never create ledger transactions or indicate that a bill was paid; occurrence overrides, reminders, payment matching, and automatic transactions are intentionally deferred.
+An occurrence returns `status=outstanding|satisfied`, `targetAmount`, nullable `actualAmount` and `variance`, and an optional linked transaction. Variance is target minus actual, so an $80 target matched to a $72 transaction reports `8.00`. Matching is always explicit: the server never compares names or amounts to infer payment. Only an active, positive, unsplit expense transaction with the same owner, currency, and category is eligible. When the schedule names an account, that account must also match; an accountless schedule accepts any owned account in the same currency.
+
+Transaction create and full-replacement update requests may include `recurringExpenseOccurrence` with `recurringExpenseId` and `dueDate`. Omitting it creates an unmatched transaction or unlinks an existing match during update. Transaction responses expose the current occurrence reference. A soft-deleted transaction retains its durable association but the occurrence becomes outstanding; restore revalidates the current schedule and associations before making it satisfied again. Schedule edits that would invalidate retained matches conflict until those matches are unlinked or replaced.
+
+Archived definitions retain occurrences due through their archive date and stop projecting later ones. Forecast dates remain deterministic and are calculated on demand; only the explicit occurrence-to-transaction association is persisted. Projections never create ledger transactions or claim payment on their own. Occurrence skips/overrides, reminders, automatic or fuzzy matching, payment execution, and split transactions satisfying multiple occurrences remain out of scope.
 
 ## Budget contract
 
@@ -384,25 +391,39 @@ An abridged progress response is shaped for both summary cards and line-item dri
   "endDate": "2026-08-31",
   "planned": 800.00,
   "committed": 929.99,
+  "scheduledTarget": 929.99,
+  "outstandingScheduledTarget": 840.00,
+  "totalBudgeted": 1729.99,
   "remainingAfterCommitments": -129.99,
   "underfunded": true,
   "budgetedActual": 153.65,
-  "unbudgetedActual": 35.00,
-  "totalActual": 188.65,
-  "remaining": 611.35,
-  "percentageUsed": 23.58,
+  "unbudgetedActual": 119.99,
+  "totalActual": 273.64,
+  "remaining": 1456.35,
+  "percentageUsed": 15.82,
+  "percentSpent": 15.82,
+  "projectedUsage": 1113.64,
+  "projectedRemaining": 616.35,
+  "projectedPercentage": 64.37,
   "lines": [
     {
       "lineId": "71000000-0000-0000-0000-000000000001",
       "categoryId": "30000000-0000-0000-0000-000000000001",
       "planned": 600.00,
       "committed": 0.00,
+      "scheduledTarget": 0.00,
+      "outstandingScheduledTarget": 0.00,
+      "totalBudgeted": 600.00,
       "remainingAfterCommitments": 600.00,
       "underfunded": false,
       "scheduledCommitments": [],
       "actual": 153.65,
       "remaining": 446.35,
       "percentageUsed": 25.61,
+      "percentSpent": 25.61,
+      "projectedUsage": 153.65,
+      "projectedRemaining": 446.35,
+      "projectedPercentage": 25.61,
       "drillDown": {
         "from": "2026-08-01",
         "to": "2026-08-31",
@@ -421,6 +442,11 @@ An abridged progress response is shaped for both summary cards and line-item dri
     {
       "categoryId": "30000000-0000-0000-0000-000000000008",
       "committed": 209.99,
+      "scheduledTarget": 209.99,
+      "outstandingScheduledTarget": 120.00,
+      "totalBudgeted": 209.99,
+      "actual": 84.99,
+      "projectedUsage": 204.99,
       "scheduledCommitments": ["..."]
     }
   ],
@@ -439,7 +465,9 @@ An abridged progress response is shaped for both summary cards and line-item dri
 
 Budget progress is recalculated from active expense transactions in the inclusive budget period and matching account currency. Positive expenses increase actual spending; negative expense refunds reduce it. Income, transfers, soft-deleted transactions, foreign owners, other currencies, and out-of-period activity are excluded. Split rows contribute their allocated amounts rather than the parent amount.
 
-Only active budget lines receive progress. A line includes its category and descendants. When parent and child lines overlap, each allocation goes to the closest matching line (then line position), preventing double counting. Unmatched and uncategorized spending is returned in separate `unbudgeted` rows. Overall fields distinguish `budgetedActual`, `unbudgetedActual`, and `totalActual`; overall remaining is planned minus total actual. Negative remaining and percentages above 100 are preserved, while a zero planned amount returns a null percentage. Every line and unbudgeted row includes stable contributing transaction IDs plus its date, account, category, type, and lifecycle drill-down filters.
+Flexible line plans and scheduled targets are additive: `totalBudgeted = planned + scheduledTarget`. Actual spending remains ledger-derived, and `percentSpent = actual / totalBudgeted`. `projectedUsage = actual + outstandingScheduledTarget`; a satisfied occurrence contributes its actual transaction through normal spending and its target is removed from the outstanding amount, so it is never counted twice. `remaining` and `projectedRemaining` subtract actual and projected usage from total budgeted. Percentages are fixed to two decimals and remain null when total budgeted is zero. The legacy `committed`, `remainingAfterCommitments`, `underfunded`, and `percentageUsed` fields remain for compatibility; `committed` aliases scheduled target and `percentageUsed` aliases percent spent.
+
+Only active budget lines receive progress. A line includes its category and descendants. When parent and child lines overlap, each allocation and occurrence goes to the closest matching line (then line position), preventing duplicate lines and double counting. Scheduled targets without a flexible line remain in enriched `unbudgetedCommitments` rows. Unmatched and uncategorized spending is returned in separate `unbudgeted` rows. Overall fields distinguish `budgetedActual`, `unbudgetedActual`, and `totalActual`. Negative remaining and percentages above 100 are preserved, while a zero total budget returns a null percentage. Every line and unbudgeted row includes stable contributing transaction IDs plus its date, account, category, type, and lifecycle drill-down filters.
 
 Each drill-down now also supplies a bookmarkable `transactionsPath`. The endpoint returns the established transaction page response and accepts `page`, `size`, `sort`, and `direction` just like transaction search. Supported scopes are:
 

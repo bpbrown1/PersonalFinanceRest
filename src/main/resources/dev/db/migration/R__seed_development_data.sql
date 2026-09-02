@@ -120,7 +120,12 @@ MERGE INTO financial_transaction (
      '10000000-0000-0000-0000-000000000001', NULL,
      35.00, 'EXPENSE', DATE '2026-08-21', 'Unbudgeted purchase',
      'Corner Store', 'Exercises unbudgeted progress', 'DEV-UNBUDGETED-001', NULL,
-     DATE '2026-08-21', DATE '2026-08-21');
+     DATE '2026-08-21', DATE '2026-08-21'),
+    ('40000000-0000-0000-0000-000000000013', '00000000-0000-0000-0000-000000000001',
+     '10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000008',
+     84.99, 'EXPENSE', DATE '2026-08-31', 'August home internet',
+     'Example Internet Provider', 'US-062 satisfied recurring occurrence', 'DEV-INTERNET-001', NULL,
+     DATE '2026-08-31', DATE '2026-08-31');
 
 MERGE INTO financial_transaction (
     id, owner_id, account_id, category_id, transfer_id, amount, type, transaction_date, description,
@@ -209,3 +214,10 @@ MERGE INTO recurring_expense (
      '10000000-0000-0000-0000-000000000001', DATE '2026-01-05', NULL, 1,
      TIMESTAMP '2026-07-10 00:00:00', 1,
      TIMESTAMP '2026-01-01 00:00:00', TIMESTAMP '2026-07-10 00:00:00');
+
+MERGE INTO recurring_expense_match (
+    id, owner_id, recurring_expense_id, due_date, transaction_id, created_at, updated_at
+) KEY (id) VALUES
+    ('81000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001',
+     '80000000-0000-0000-0000-000000000001', DATE '2026-08-31',
+     '40000000-0000-0000-0000-000000000013', DATE '2026-08-31', DATE '2026-08-31');

@@ -167,6 +167,51 @@ class BudgetProgressServiceTest {
         });
     }
 
+    @Test
+    void replacesASatisfiedScheduledTargetWithActualInProjectedUsage() {
+        Budget budget = new Budget(
+                budgetId, ownerId, "August", "USD",
+                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31)
+        );
+        budget.addLine(parentId, amount("800.00"));
+        TransactionCategory parent = category(parentId, null);
+        when(budgetRepository.findByIdAndOwnerId(budgetId, ownerId)).thenReturn(Optional.of(budget));
+        when(categoryRepository.findAllByOwnerIdOrderByNormalizedNameAsc(ownerId))
+                .thenReturn(List.of(parent));
+        UUID paidTransaction = UUID.randomUUID();
+        when(spendingSource.findExpenseAllocations(
+                ownerId, "USD", budget.getStartDate(), budget.getEndDate(), null
+        )).thenReturn(List.of(allocation(paidTransaction, parentId, "72.00")));
+        UUID paidExpense = UUID.randomUUID();
+        UUID outstandingExpense = UUID.randomUUID();
+        when(commitmentSource.findScheduledCommitments(
+                ownerId, "USD", budget.getStartDate(), budget.getEndDate(), null
+        )).thenReturn(List.of(
+                new BudgetScheduledCommitment(
+                        paidExpense + ":2026-08-15", paidExpense, "Water",
+                        LocalDate.of(2026, 8, 15), amount("80.00"), "USD", parentId, null,
+                        true, amount("72.00"), amount("8.00"), paidTransaction),
+                new BudgetScheduledCommitment(
+                        outstandingExpense + ":2026-08-20", outstandingExpense, "Internet",
+                        LocalDate.of(2026, 8, 20), amount("120.00"), "USD", parentId, null)
+        ));
+
+        BudgetProgressResponse response = service.calculate(budgetId, null, null);
+
+        assertThat(response.planned()).isEqualByComparingTo("800.00");
+        assertThat(response.scheduledTarget()).isEqualByComparingTo("200.00");
+        assertThat(response.outstandingScheduledTarget()).isEqualByComparingTo("120.00");
+        assertThat(response.totalBudgeted()).isEqualByComparingTo("1000.00");
+        assertThat(response.totalActual()).isEqualByComparingTo("72.00");
+        assertThat(response.percentSpent()).isEqualByComparingTo("7.20");
+        assertThat(response.projectedUsage()).isEqualByComparingTo("192.00");
+        assertThat(response.projectedRemaining()).isEqualByComparingTo("808.00");
+        assertThat(response.projectedPercentage()).isEqualByComparingTo("19.20");
+        assertThat(response.lines().getFirst().scheduledCommitments())
+                .extracting(BudgetScheduledCommitment::satisfied)
+                .containsExactly(true, false);
+    }
+
     private TransactionCategory category(UUID id, UUID parentId) {
         TransactionCategory category = mock(TransactionCategory.class);
         when(category.getId()).thenReturn(id);

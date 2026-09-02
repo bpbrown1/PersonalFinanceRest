@@ -49,10 +49,14 @@ class DevelopmentDataIT {
 
         mockMvc.perform(get("/api/v1/transactions").queryParam("status", "all"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items.length()").value(12))
+                .andExpect(jsonPath("$.items.length()").value(13))
                 .andExpect(jsonPath("$.items[?(@.description == 'Weekly groceries')].splits[0].amount")
                         .value(org.hamcrest.Matchers.contains(100.0)))
-                .andExpect(jsonPath("$.totalElements").value(12));
+                .andExpect(jsonPath("$.totalElements").value(13))
+                .andExpect(jsonPath("$.items[?(@.description == 'August home internet')]"
+                                + ".recurringExpenseOccurrence.occurrenceKey")
+                        .value(org.hamcrest.Matchers.contains(
+                                "80000000-0000-0000-0000-000000000001:2026-08-31")));
 
         mockMvc.perform(get("/api/v1/transactions")
                         .queryParam("type", "transfer_in")
@@ -83,9 +87,9 @@ class DevelopmentDataIT {
                 .andExpect(jsonPath("$[0].transactionCount").value(1))
                 .andExpect(jsonPath("$[1].currency").value("USD"))
                 .andExpect(jsonPath("$[1].income").value(3218.25))
-                .andExpect(jsonPath("$[1].spending").value(188.65))
-                .andExpect(jsonPath("$[1].netImpact").value(3029.60))
-                .andExpect(jsonPath("$[1].transactionCount").value(6));
+                .andExpect(jsonPath("$[1].spending").value(273.64))
+                .andExpect(jsonPath("$[1].netImpact").value(2944.61))
+                .andExpect(jsonPath("$[1].transactionCount").value(7));
 
         mockMvc.perform(get("/api/v1/budgets").queryParam("status", "all"))
                 .andExpect(status().isOk())
@@ -100,20 +104,24 @@ class DevelopmentDataIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.planned").value(800.0))
                 .andExpect(jsonPath("$.committed").value(929.99))
+                .andExpect(jsonPath("$.outstandingScheduledTarget").value(840.0))
+                .andExpect(jsonPath("$.totalBudgeted").value(1729.99))
                 .andExpect(jsonPath("$.unbudgetedCommitments.length()").value(2))
                 .andExpect(jsonPath("$.budgetedActual").value(153.65))
-                .andExpect(jsonPath("$.unbudgetedActual").value(35.0))
-                .andExpect(jsonPath("$.totalActual").value(188.65));
+                .andExpect(jsonPath("$.unbudgetedActual").value(119.99))
+                .andExpect(jsonPath("$.totalActual").value(273.64))
+                .andExpect(jsonPath("$.projectedUsage").value(1113.64));
 
         mockMvc.perform(get("/api/v1/budgets/70000000-0000-0000-0000-000000000001/progress/transactions")
                         .queryParam("scope", "overall"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalElements").value(4))
+                .andExpect(jsonPath("$.totalElements").value(5))
                 .andExpect(jsonPath("$.items[*].id").value(org.hamcrest.Matchers.hasItems(
                         "40000000-0000-0000-0000-000000000002",
                         "40000000-0000-0000-0000-000000000003",
                         "40000000-0000-0000-0000-000000000011",
-                        "40000000-0000-0000-0000-000000000012"
+                        "40000000-0000-0000-0000-000000000012",
+                        "40000000-0000-0000-0000-000000000013"
                 )));
     }
 

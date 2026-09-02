@@ -26,7 +26,10 @@ class RecurringExpenseBudgetCommitmentSource implements BudgetCommitmentSource {
                     return new BudgetScheduledCommitment(
                             occurrence.occurrenceKey(), occurrence.recurringExpenseId(), occurrence.name(),
                             occurrence.dueDate(), occurrence.amount(), occurrence.currency(),
-                            occurrence.categoryId(), occurrence.accountId()
+                            occurrence.categoryId(), occurrence.accountId(),
+                            occurrence.status() == RecurringExpenseOccurrenceStatus.SATISFIED,
+                            occurrence.actualAmount(), occurrence.variance(),
+                            occurrence.linkedTransaction() == null ? null : occurrence.linkedTransaction().id()
                     );
                 }).toList();
     }
