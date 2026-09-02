@@ -35,6 +35,7 @@ public record BudgetProgressResponse(
         List<BudgetProgressComponentResponse> components,
         List<UnbudgetedProgressResponse> unbudgeted,
         List<UnbudgetedCommitmentResponse> unbudgetedCommitments,
+        List<BudgetCategoryProgressResponse> hierarchy,
         BudgetProgressDrillDown drillDown
 ) {
 }
