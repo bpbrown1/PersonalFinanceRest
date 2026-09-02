@@ -16,6 +16,8 @@ public record BudgetLineProgressResponse(
         BigDecimal remainingAfterCommitments,
         boolean underfunded,
         List<BudgetScheduledCommitment> scheduledCommitments,
+        BigDecimal flexibleActual,
+        BigDecimal billActual,
         BigDecimal actual,
         BigDecimal remaining,
         BigDecimal percentageUsed,

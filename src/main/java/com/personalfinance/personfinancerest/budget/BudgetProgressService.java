@@ -73,11 +73,32 @@ class BudgetProgressService {
         activeLines.forEach(line -> lineCommitments.put(line.getId(), new MutableCommitments()));
         Map<UUID, MutableCommitments> unbudgetedCommitments = new LinkedHashMap<>();
 
+        List<BudgetScheduledCommitment> commitments = commitmentSource.findScheduledCommitments(
+                ownerId, budget.getCurrency(), budget.getStartDate(), budget.getEndDate(), accountId
+        ).stream().filter(commitment -> filterCategoryIds == null
+                        || filterCategoryIds.contains(commitment.categoryId()))
+                .toList();
+        Map<UUID, BudgetScheduledCommitment> commitmentByLinkedTransaction = new HashMap<>();
+        for (BudgetScheduledCommitment commitment : commitments) {
+            BudgetLine line = mostSpecificLine(activeLines, commitment.categoryId(), parentByCategory);
+            MutableCommitments target = line == null
+                    ? unbudgetedCommitments.computeIfAbsent(
+                            commitment.categoryId(), ignored -> new MutableCommitments())
+                    : lineCommitments.get(line.getId());
+            target.add(commitment);
+            if (commitment.satisfied() && commitment.linkedTransactionId() != null) {
+                commitmentByLinkedTransaction.put(commitment.linkedTransactionId(), commitment);
+            }
+        }
+
         List<BudgetSpendingAllocation> allocations = spendingSource.findExpenseAllocations(
                 ownerId, budget.getCurrency(), budget.getStartDate(), budget.getEndDate(), accountId
         );
         for (BudgetSpendingAllocation allocation : allocations) {
             if (filterCategoryIds != null && !filterCategoryIds.contains(allocation.categoryId())) {
+                continue;
+            }
+            if (commitmentByLinkedTransaction.containsKey(allocation.transactionId())) {
                 continue;
             }
             BudgetLine line = mostSpecificLine(activeLines, allocation.categoryId(), parentByCategory);
@@ -87,36 +108,24 @@ class BudgetProgressService {
             target.add(allocation.amount(), allocation.transactionId());
         }
 
-        List<BudgetScheduledCommitment> commitments = commitmentSource.findScheduledCommitments(
-                ownerId, budget.getCurrency(), budget.getStartDate(), budget.getEndDate(), accountId
-        ).stream().filter(commitment -> filterCategoryIds == null
-                        || filterCategoryIds.contains(commitment.categoryId()))
-                .toList();
-        for (BudgetScheduledCommitment commitment : commitments) {
-            BudgetLine line = mostSpecificLine(activeLines, commitment.categoryId(), parentByCategory);
-            MutableCommitments target = line == null
-                    ? unbudgetedCommitments.computeIfAbsent(
-                            commitment.categoryId(), ignored -> new MutableCommitments())
-                    : lineCommitments.get(line.getId());
-            target.add(commitment);
-        }
-
         List<BudgetLineProgressResponse> lines = activeLines.stream().map(line -> {
             MutableProgress progress = lineProgress.get(line.getId());
             MutableCommitments scheduled = lineCommitments.get(line.getId());
             BigDecimal planned = line.getPlannedAmount();
             BigDecimal totalBudgeted = planned.add(scheduled.total);
-            BigDecimal projectedUsage = progress.actual.add(scheduled.outstanding);
+            BigDecimal actual = progress.actual.add(scheduled.actual);
+            BigDecimal projectedUsage = actual.add(scheduled.outstanding);
             Set<UUID> categoryIds = descendants(line.getCategoryId(), parentByCategory);
             return new BudgetLineProgressResponse(
                     line.getId(), line.getCategoryId(), line.getPosition(), planned,
                     scheduled.total, scheduled.total, scheduled.outstanding, totalBudgeted,
                     planned.subtract(scheduled.total), scheduled.total.compareTo(planned) > 0,
-                    List.copyOf(scheduled.items), progress.actual,
-                    totalBudgeted.subtract(progress.actual), percentage(progress.actual, totalBudgeted),
-                    percentage(progress.actual, totalBudgeted), projectedUsage,
+                    List.copyOf(scheduled.items), progress.actual, scheduled.actual, actual,
+                    totalBudgeted.subtract(actual), percentage(actual, totalBudgeted),
+                    percentage(actual, totalBudgeted), projectedUsage,
                     totalBudgeted.subtract(projectedUsage), percentage(projectedUsage, totalBudgeted),
-                    drillDown(budget, accountId, categoryIds, progress.transactionIds,
+                    drillDown(budget, accountId, categoryIds,
+                            combinedTransactionIds(progress.transactionIds, scheduled.transactionIds),
                             "line", line.getId(), null, false)
             );
         }).toList();
@@ -125,13 +134,13 @@ class BudgetProgressService {
                 .sorted(Map.Entry.comparingByKey(Comparator.comparing(UUID::toString)))
                 .map(entry -> {
                     MutableCommitments scheduled = entry.getValue();
-                    MutableProgress progress = unbudgeted.getOrDefault(entry.getKey(), new MutableProgress());
                     BigDecimal totalBudgeted = scheduled.total;
-                    BigDecimal projectedUsage = progress.actual.add(scheduled.outstanding);
+                    BigDecimal projectedUsage = scheduled.actual.add(scheduled.outstanding);
                     return new UnbudgetedCommitmentResponse(
                             entry.getKey(), scheduled.total, scheduled.total, scheduled.outstanding,
-                            totalBudgeted, progress.actual, totalBudgeted.subtract(progress.actual),
-                            percentage(progress.actual, totalBudgeted), projectedUsage,
+                            totalBudgeted, scheduled.actual, scheduled.actual,
+                            totalBudgeted.subtract(scheduled.actual),
+                            percentage(scheduled.actual, totalBudgeted), projectedUsage,
                             totalBudgeted.subtract(projectedUsage), percentage(projectedUsage, totalBudgeted),
                             List.copyOf(scheduled.items)
                     );
@@ -147,13 +156,27 @@ class BudgetProgressService {
                                 "unbudgeted", null, entry.getKey(), entry.getKey() == null)
                 )).toList();
 
+        List<BudgetProgressComponentResponse> components = new ArrayList<>();
+        activeLines.forEach(line -> components.add(flexibleComponent(
+                budget, accountId, line, lineProgress.get(line.getId()), parentByCategory
+        )));
+        commitments.forEach(commitment -> components.add(recurringComponent(
+                budget, accountId, commitment
+        )));
+
         BigDecimal planned = activeLines.stream().map(BudgetLine::getPlannedAmount).reduce(ZERO, BigDecimal::add);
         BigDecimal committed = commitments.stream()
                 .map(BudgetScheduledCommitment::amount).reduce(ZERO, BigDecimal::add);
         BigDecimal outstandingCommitted = commitments.stream()
                 .map(BudgetScheduledCommitment::outstandingAmount).reduce(ZERO, BigDecimal::add);
-        BigDecimal budgetedActual = lineProgress.values().stream()
+        BigDecimal flexibleActual = lineProgress.values().stream()
                 .map(progress -> progress.actual).reduce(ZERO, BigDecimal::add);
+        BigDecimal billActual = commitments.stream()
+                .filter(BudgetScheduledCommitment::satisfied)
+                .map(BudgetScheduledCommitment::actualAmount)
+                .filter(java.util.Objects::nonNull)
+                .reduce(ZERO, BigDecimal::add);
+        BigDecimal budgetedActual = flexibleActual.add(billActual);
         BigDecimal unbudgetedActual = unbudgeted.values().stream()
                 .map(progress -> progress.actual).reduce(ZERO, BigDecimal::add);
         BigDecimal totalActual = budgetedActual.add(unbudgetedActual);
@@ -164,21 +187,94 @@ class BudgetProgressService {
                 .filter(allocation -> filterCategoryIds == null || filterCategoryIds.contains(allocation.categoryId()))
                 .map(BudgetSpendingAllocation::transactionId)
                 .forEach(allTransactionIds::add);
+        commitments.stream()
+                .filter(BudgetScheduledCommitment::satisfied)
+                .map(BudgetScheduledCommitment::linkedTransactionId)
+                .filter(java.util.Objects::nonNull)
+                .forEach(allTransactionIds::add);
 
         return new BudgetProgressResponse(
                 budget.getId(), ownerId, budget.getCurrency(), budget.getStartDate(), budget.getEndDate(),
                 accountId, categoryId, planned, committed, committed, outstandingCommitted, totalBudgeted,
                 planned.subtract(committed),
-                committed.compareTo(planned) > 0, budgetedActual, unbudgetedActual, totalActual,
+                committed.compareTo(planned) > 0, flexibleActual, billActual,
+                budgetedActual, unbudgetedActual, totalActual,
                 totalBudgeted.subtract(totalActual), percentage(totalActual, totalBudgeted),
                 percentage(totalActual, totalBudgeted), projectedUsage,
                 totalBudgeted.subtract(projectedUsage), percentage(projectedUsage, totalBudgeted),
-                lines, unbudgetedRows,
+                lines, List.copyOf(components), unbudgetedRows,
                 unbudgetedCommitmentRows,
                 drillDown(budget, accountId,
                         filterCategoryIds == null ? Set.of() : filterCategoryIds, allTransactionIds,
                         "overall", null, categoryId, false)
         );
+    }
+
+    private BudgetProgressComponentResponse flexibleComponent(
+            Budget budget,
+            UUID accountId,
+            BudgetLine line,
+            MutableProgress progress,
+            Map<UUID, UUID> parentByCategory
+    ) {
+        BigDecimal target = line.getPlannedAmount();
+        Set<UUID> categoryIds = descendants(line.getCategoryId(), parentByCategory);
+        return new BudgetProgressComponentResponse(
+                "line:" + line.getId(), BudgetComponentSource.FLEXIBLE,
+                line.getId(), null, null, line.getCategoryId(), line.getPosition(),
+                null, null, target, progress.actual, target.subtract(progress.actual),
+                percentage(progress.actual, target), progress.actual,
+                target.subtract(progress.actual), percentage(progress.actual, target),
+                null, null, null,
+                drillDown(budget, accountId, categoryIds, progress.transactionIds,
+                        "line", line.getId(), null, false)
+        );
+    }
+
+    private BudgetProgressComponentResponse recurringComponent(
+            Budget budget,
+            UUID accountId,
+            BudgetScheduledCommitment commitment
+    ) {
+        BigDecimal actual = commitment.satisfied() && commitment.actualAmount() != null
+                ? commitment.actualAmount() : ZERO;
+        BigDecimal projectedUsage = commitment.satisfied() ? actual : commitment.amount();
+        Set<UUID> transactionIds = commitment.satisfied() && commitment.linkedTransactionId() != null
+                ? Set.of(commitment.linkedTransactionId()) : Set.of();
+        return new BudgetProgressComponentResponse(
+                "occurrence:" + commitment.occurrenceKey(), BudgetComponentSource.RECURRING,
+                null, commitment.occurrenceKey(), commitment.recurringExpenseId(),
+                commitment.categoryId(), null, commitment.name(), commitment.dueDate(),
+                commitment.amount(), actual, commitment.amount().subtract(actual),
+                percentage(actual, commitment.amount()), projectedUsage,
+                commitment.amount().subtract(projectedUsage),
+                percentage(projectedUsage, commitment.amount()),
+                commitment.satisfied() ? BudgetComponentStatus.SATISFIED
+                        : BudgetComponentStatus.OUTSTANDING,
+                commitment.variance(), commitment.linkedTransactionId(),
+                componentDrillDown(budget, accountId, commitment, transactionIds)
+        );
+    }
+
+    private BudgetProgressDrillDown componentDrillDown(
+            Budget budget,
+            UUID accountId,
+            BudgetScheduledCommitment commitment,
+            Set<UUID> transactionIds
+    ) {
+        return new BudgetProgressDrillDown(
+                budget.getStartDate(), budget.getEndDate(), accountId,
+                commitment.categoryId() == null ? List.of() : List.of(commitment.categoryId()),
+                "expense", "active", List.copyOf(transactionIds),
+                transactionsPath(budget.getId(), accountId, "component", null,
+                        null, false, commitment.occurrenceKey())
+        );
+    }
+
+    private Set<UUID> combinedTransactionIds(Set<UUID> first, Set<UUID> second) {
+        LinkedHashSet<UUID> result = new LinkedHashSet<>(first);
+        result.addAll(second);
+        return Set.copyOf(result);
     }
 
     private void validateAccount(UUID ownerId, UUID accountId, String budgetCurrency) {
@@ -235,12 +331,12 @@ class BudgetProgressService {
                 budget.getStartDate(), budget.getEndDate(), accountId,
                 categoryIds.stream().sorted(Comparator.comparing(UUID::toString)).toList(),
                 "expense", "active", List.copyOf(transactionIds),
-                transactionsPath(budget.getId(), accountId, scope, lineId, categoryId, uncategorized)
+                transactionsPath(budget.getId(), accountId, scope, lineId, categoryId, uncategorized, null)
         );
     }
 
     private String transactionsPath(UUID budgetId, UUID accountId, String scope, UUID lineId,
-                                    UUID categoryId, boolean uncategorized) {
+                                    UUID categoryId, boolean uncategorized, String occurrenceKey) {
         UriComponentsBuilder builder = UriComponentsBuilder
                 .fromPath("/api/v1/budgets/{budgetId}/progress/transactions")
                 .queryParam("scope", scope);
@@ -255,6 +351,9 @@ class BudgetProgressService {
         }
         if (uncategorized) {
             builder.queryParam("uncategorized", true);
+        }
+        if (occurrenceKey != null) {
+            builder.queryParam("occurrenceKey", occurrenceKey);
         }
         return builder.buildAndExpand(budgetId).toUriString();
     }
@@ -279,11 +378,19 @@ class BudgetProgressService {
     private static final class MutableCommitments {
         private BigDecimal total = ZERO;
         private BigDecimal outstanding = ZERO;
+        private BigDecimal actual = ZERO;
         private final List<BudgetScheduledCommitment> items = new ArrayList<>();
+        private final Set<UUID> transactionIds = new LinkedHashSet<>();
 
         private void add(BudgetScheduledCommitment commitment) {
             total = total.add(commitment.amount());
             outstanding = outstanding.add(commitment.outstandingAmount());
+            if (commitment.satisfied() && commitment.actualAmount() != null) {
+                actual = actual.add(commitment.actualAmount());
+            }
+            if (commitment.satisfied() && commitment.linkedTransactionId() != null) {
+                transactionIds.add(commitment.linkedTransactionId());
+            }
             items.add(commitment);
         }
     }

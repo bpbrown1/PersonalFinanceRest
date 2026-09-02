@@ -212,6 +212,121 @@ class BudgetProgressServiceTest {
                 .containsExactly(true, false);
     }
 
+    @Test
+    void classifiesMatchedBillActualSeparatelyAndLeavesUnrelatedActivityUnplanned() {
+        Budget budget = new Budget(
+                budgetId, ownerId, "August", "USD",
+                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31)
+        );
+        TransactionCategory subscriptions = category(unbudgetedId, null);
+        when(budgetRepository.findByIdAndOwnerId(budgetId, ownerId)).thenReturn(Optional.of(budget));
+        when(categoryRepository.findAllByOwnerIdOrderByNormalizedNameAsc(ownerId))
+                .thenReturn(List.of(subscriptions));
+        UUID billTransaction = UUID.randomUUID();
+        UUID unrelatedTransaction = UUID.randomUUID();
+        when(spendingSource.findExpenseAllocations(
+                ownerId, "USD", budget.getStartDate(), budget.getEndDate(), null
+        )).thenReturn(List.of(
+                allocation(billTransaction, unbudgetedId, "89.99"),
+                allocation(unrelatedTransaction, unbudgetedId, "12.00")
+        ));
+        UUID recurringExpenseId = UUID.randomUUID();
+        String occurrenceKey = recurringExpenseId + ":2026-08-31";
+        when(commitmentSource.findScheduledCommitments(
+                ownerId, "USD", budget.getStartDate(), budget.getEndDate(), null
+        )).thenReturn(List.of(new BudgetScheduledCommitment(
+                occurrenceKey, recurringExpenseId, "Home internet", LocalDate.of(2026, 8, 31),
+                amount("100.00"), "USD", unbudgetedId, null,
+                true, amount("89.99"), amount("10.01"), billTransaction
+        )));
+
+        BudgetProgressResponse response = service.calculate(budgetId, null, null);
+
+        assertThat(response.flexibleActual()).isEqualByComparingTo("0.00");
+        assertThat(response.billActual()).isEqualByComparingTo("89.99");
+        assertThat(response.budgetedActual()).isEqualByComparingTo("89.99");
+        assertThat(response.unbudgetedActual()).isEqualByComparingTo("12.00");
+        assertThat(response.totalActual()).isEqualByComparingTo("101.99");
+        assertThat(response.unbudgeted()).singleElement().satisfies(row -> {
+            assertThat(row.actual()).isEqualByComparingTo("12.00");
+            assertThat(row.drillDown().transactionIds()).containsExactly(unrelatedTransaction);
+        });
+        assertThat(response.unbudgetedCommitments()).singleElement().satisfies(row -> {
+            assertThat(row.billActual()).isEqualByComparingTo("89.99");
+            assertThat(row.actual()).isEqualByComparingTo("89.99");
+        });
+        assertThat(response.components()).singleElement().satisfies(component -> {
+            assertThat(component.componentKey()).isEqualTo("occurrence:" + occurrenceKey);
+            assertThat(component.source()).isEqualTo(BudgetComponentSource.RECURRING);
+            assertThat(component.status()).isEqualTo(BudgetComponentStatus.SATISFIED);
+            assertThat(component.target()).isEqualByComparingTo("100.00");
+            assertThat(component.actual()).isEqualByComparingTo("89.99");
+            assertThat(component.remaining()).isEqualByComparingTo("10.01");
+            assertThat(component.percentageUsed()).isEqualByComparingTo("89.99");
+            assertThat(component.variance()).isEqualByComparingTo("10.01");
+            assertThat(component.linkedTransactionId()).isEqualTo(billTransaction);
+            assertThat(component.drillDown().transactionIds()).containsExactly(billTransaction);
+        });
+    }
+
+    @Test
+    void exposesFlexibleAndMultipleRecurringComponentsIncludingZeroTargetsAndVariance() {
+        Budget budget = new Budget(
+                budgetId, ownerId, "August", "USD",
+                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31)
+        );
+        BudgetLine line = budget.addLine(parentId, amount("50.00"));
+        TransactionCategory parent = category(parentId, null);
+        when(budgetRepository.findByIdAndOwnerId(budgetId, ownerId)).thenReturn(Optional.of(budget));
+        when(categoryRepository.findAllByOwnerIdOrderByNormalizedNameAsc(ownerId))
+                .thenReturn(List.of(parent));
+        UUID flexibleTransaction = UUID.randomUUID();
+        UUID paidTransaction = UUID.randomUUID();
+        when(spendingSource.findExpenseAllocations(
+                ownerId, "USD", budget.getStartDate(), budget.getEndDate(), null
+        )).thenReturn(List.of(
+                allocation(flexibleTransaction, parentId, "5.00"),
+                allocation(paidTransaction, parentId, "25.00")
+        ));
+        UUID paidId = UUID.randomUUID();
+        when(commitmentSource.findScheduledCommitments(
+                ownerId, "USD", budget.getStartDate(), budget.getEndDate(), null
+        )).thenReturn(List.of(
+                commitment(parentId, "Free plan", "0.00", LocalDate.of(2026, 8, 1)),
+                commitment(parentId, "Streaming", "10.00", LocalDate.of(2026, 8, 5)),
+                new BudgetScheduledCommitment(
+                        paidId + ":2026-08-20", paidId, "Insurance", LocalDate.of(2026, 8, 20),
+                        amount("20.00"), "USD", parentId, null,
+                        true, amount("25.00"), amount("-5.00"), paidTransaction)
+        ));
+
+        BudgetProgressResponse response = service.calculate(budgetId, null, null);
+
+        assertThat(response.totalBudgeted()).isEqualByComparingTo("80.00");
+        assertThat(response.flexibleActual()).isEqualByComparingTo("5.00");
+        assertThat(response.billActual()).isEqualByComparingTo("25.00");
+        assertThat(response.projectedUsage()).isEqualByComparingTo("40.00");
+        assertThat(response.lines()).singleElement().satisfies(progress -> {
+            assertThat(progress.lineId()).isEqualTo(line.getId());
+            assertThat(progress.flexibleActual()).isEqualByComparingTo("5.00");
+            assertThat(progress.billActual()).isEqualByComparingTo("25.00");
+            assertThat(progress.actual()).isEqualByComparingTo("30.00");
+        });
+        assertThat(response.components()).hasSize(4);
+        assertThat(response.components().getFirst().source()).isEqualTo(BudgetComponentSource.FLEXIBLE);
+        assertThat(response.components().getFirst().actual()).isEqualByComparingTo("5.00");
+        assertThat(response.components().stream()
+                .filter(component -> component.target().signum() == 0)
+                .findFirst().orElseThrow().percentageUsed()).isNull();
+        assertThat(response.components()).filteredOn(component -> "Insurance".equals(component.name()))
+                .singleElement().satisfies(component -> {
+                    assertThat(component.actual()).isEqualByComparingTo("25.00");
+                    assertThat(component.remaining()).isEqualByComparingTo("-5.00");
+                    assertThat(component.percentageUsed()).isEqualByComparingTo("125.00");
+                    assertThat(component.projectedUsage()).isEqualByComparingTo("25.00");
+                });
+    }
+
     private TransactionCategory category(UUID id, UUID parentId) {
         TransactionCategory category = mock(TransactionCategory.class);
         when(category.getId()).thenReturn(id);

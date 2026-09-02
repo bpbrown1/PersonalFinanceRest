@@ -222,6 +222,69 @@ class BudgetProgressApiIT {
                 .andExpect(jsonPath("$.fieldErrors.scope").exists());
     }
 
+    @Test
+    void representsBillOnlyOccurrencesAsComponentsAndKeepsUnmatchedSpendingUnplanned() throws Exception {
+        UUID billTransaction = insertTransaction(
+                ownerId, accountId, otherCategoryId, "89.99", "EXPENSE", "2026-08-15", null
+        );
+        UUID unmatchedTransaction = insertTransaction(
+                ownerId, accountId, otherCategoryId, "12.00", "EXPENSE", "2026-08-16", null
+        );
+        UUID recurringExpenseId = insertRecurringExpense(
+                ownerId, accountId, otherCategoryId, "Home internet", "100.00", "2026-08-15"
+        );
+        insertRecurringExpenseMatch(recurringExpenseId, billTransaction, "2026-08-15");
+        String occurrenceKey = recurringExpenseId + ":2026-08-15";
+
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress", budgetId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.flexibleActual").value(0.0))
+                .andExpect(jsonPath("$.billActual").value(89.99))
+                .andExpect(jsonPath("$.budgetedActual").value(89.99))
+                .andExpect(jsonPath("$.unbudgetedActual").value(12.0))
+                .andExpect(jsonPath("$.totalBudgeted").value(200.0))
+                .andExpect(jsonPath("$.components.length()").value(3))
+                .andExpect(jsonPath("$.components[2].componentKey").value("occurrence:" + occurrenceKey))
+                .andExpect(jsonPath("$.components[2].source").value("recurring"))
+                .andExpect(jsonPath("$.components[2].status").value("satisfied"))
+                .andExpect(jsonPath("$.components[2].target").value(100.0))
+                .andExpect(jsonPath("$.components[2].actual").value(89.99))
+                .andExpect(jsonPath("$.components[2].remaining").value(10.01))
+                .andExpect(jsonPath("$.components[2].linkedTransactionId")
+                        .value(billTransaction.toString()))
+                .andExpect(jsonPath("$.components[2].drillDown.transactionIds[0]")
+                        .value(billTransaction.toString()))
+                .andExpect(jsonPath("$.unbudgeted[0].actual").value(12.0))
+                .andExpect(jsonPath("$.unbudgeted[0].drillDown.transactionIds")
+                        .value(org.hamcrest.Matchers.contains(unmatchedTransaction.toString())))
+                .andExpect(jsonPath("$.unbudgetedCommitments[0].billActual").value(89.99));
+
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress/transactions", budgetId)
+                        .queryParam("scope", "component")
+                        .queryParam("occurrenceKey", occurrenceKey))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(billTransaction.toString()));
+
+        jdbcTemplate.update(
+                "UPDATE financial_transaction SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                billTransaction
+        );
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress", budgetId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.billActual").value(0.0))
+                .andExpect(jsonPath("$.components[2].status").value("outstanding"))
+                .andExpect(jsonPath("$.components[2].actual").value(0.0))
+                .andExpect(jsonPath("$.components[2].projectedUsage").value(100.0))
+                .andExpect(jsonPath("$.components[2].drillDown.transactionIds.length()").value(0));
+
+        jdbcTemplate.update("UPDATE financial_transaction SET deleted_at = NULL WHERE id = ?", billTransaction);
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress", budgetId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.billActual").value(89.99))
+                .andExpect(jsonPath("$.components[2].status").value("satisfied"));
+    }
+
     private void insertAccount(UUID id, UUID accountOwnerId, String currency) {
         jdbcTemplate.update("""
                 INSERT INTO financial_account
@@ -274,6 +337,34 @@ class BudgetProgressApiIT {
                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """, UUID.randomUUID(), transferOwnerId, transferAccountId, UUID.randomUUID(),
                 new BigDecimal(amount), LocalDate.parse(date));
+    }
+
+    private UUID insertRecurringExpense(
+            UUID recurringOwnerId,
+            UUID recurringAccountId,
+            UUID recurringCategoryId,
+            String name,
+            String amount,
+            String anchorDate
+    ) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO recurring_expense
+                (id, owner_id, name, amount, currency, category_id, account_id, anchor_date,
+                 end_date, interval_months, archived_at, version, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'USD', ?, ?, ?, NULL, 1, NULL, 0,
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, id, recurringOwnerId, name, new BigDecimal(amount), recurringCategoryId,
+                recurringAccountId, LocalDate.parse(anchorDate));
+        return id;
+    }
+
+    private void insertRecurringExpenseMatch(UUID recurringExpenseId, UUID transactionId, String dueDate) {
+        jdbcTemplate.update("""
+                INSERT INTO recurring_expense_match
+                (id, owner_id, recurring_expense_id, due_date, transaction_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), ownerId, recurringExpenseId, LocalDate.parse(dueDate), transactionId);
     }
 
     private BigDecimal amount(String value) {

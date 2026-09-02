@@ -8,6 +8,7 @@ import java.util.UUID;
 record BudgetProgressTransactionQuery(
         Scope scope,
         UUID lineId,
+        String occurrenceKey,
         UUID accountId,
         UUID categoryId,
         boolean uncategorized,
@@ -20,6 +21,7 @@ record BudgetProgressTransactionQuery(
     static BudgetProgressTransactionQuery from(
             String scope,
             UUID lineId,
+            String occurrenceKey,
             UUID accountId,
             UUID categoryId,
             boolean uncategorized,
@@ -33,15 +35,25 @@ record BudgetProgressTransactionQuery(
         switch (parsedScope) {
             case OVERALL -> {
                 reject(lineId != null, "lineId", "is only supported for line scope", errors);
+                reject(occurrenceKey != null, "occurrenceKey", "is only supported for component scope", errors);
                 reject(uncategorized, "uncategorized", "is only supported for unbudgeted scope", errors);
             }
             case LINE -> {
                 reject(lineId == null, "lineId", "is required for line scope", errors);
+                reject(occurrenceKey != null, "occurrenceKey", "is not supported for line scope", errors);
                 reject(categoryId != null, "categoryId", "is not supported for line scope", errors);
                 reject(uncategorized, "uncategorized", "is not supported for line scope", errors);
             }
+            case COMPONENT -> {
+                reject(occurrenceKey == null || occurrenceKey.isBlank(), "occurrenceKey",
+                        "is required for component scope", errors);
+                reject(lineId != null, "lineId", "is not supported for component scope", errors);
+                reject(categoryId != null, "categoryId", "is not supported for component scope", errors);
+                reject(uncategorized, "uncategorized", "is not supported for component scope", errors);
+            }
             case UNBUDGETED -> {
                 reject(lineId != null, "lineId", "is not supported for unbudgeted scope", errors);
+                reject(occurrenceKey != null, "occurrenceKey", "is not supported for unbudgeted scope", errors);
                 reject(categoryId == null && !uncategorized, "categoryId",
                         "or uncategorized=true is required for unbudgeted scope", errors);
                 reject(categoryId != null && uncategorized, "uncategorized",
@@ -52,7 +64,8 @@ record BudgetProgressTransactionQuery(
             throw new InvalidBudgetRequestException(errors);
         }
         return new BudgetProgressTransactionQuery(
-                parsedScope, lineId, accountId, categoryId, uncategorized,
+                parsedScope, lineId, occurrenceKey == null ? null : occurrenceKey.trim(),
+                accountId, categoryId, uncategorized,
                 page, size, sort, direction
         );
     }
@@ -66,6 +79,7 @@ record BudgetProgressTransactionQuery(
     enum Scope {
         OVERALL,
         LINE,
+        COMPONENT,
         UNBUDGETED;
 
         private static Scope from(String value) {
@@ -73,7 +87,7 @@ record BudgetProgressTransactionQuery(
                 return Scope.valueOf((value == null ? "overall" : value.trim()).toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException exception) {
                 throw new InvalidBudgetRequestException(Map.of(
-                        "scope", "must be one of: overall, line, unbudgeted"
+                        "scope", "must be one of: overall, line, component, unbudgeted"
                 ));
             }
         }

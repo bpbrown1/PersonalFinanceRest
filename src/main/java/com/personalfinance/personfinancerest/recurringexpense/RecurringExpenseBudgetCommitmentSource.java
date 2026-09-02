@@ -20,17 +20,24 @@ class RecurringExpenseBudgetCommitmentSource implements BudgetCommitmentSource {
     @Override
     public List<BudgetScheduledCommitment> findScheduledCommitments(
             UUID ownerId, String currency, LocalDate from, LocalDate to, UUID accountId) {
-        return service.project(ownerId, currency, from, to, accountId).stream()
+        return service.project(ownerId, currency, from, to, null).stream()
                 .map(projected -> {
                     RecurringExpenseOccurrenceResponse occurrence = projected.response();
+                    RecurringExpenseLinkedTransactionResponse linked = occurrence.linkedTransaction();
                     return new BudgetScheduledCommitment(
                             occurrence.occurrenceKey(), occurrence.recurringExpenseId(), occurrence.name(),
                             occurrence.dueDate(), occurrence.amount(), occurrence.currency(),
                             occurrence.categoryId(), occurrence.accountId(),
                             occurrence.status() == RecurringExpenseOccurrenceStatus.SATISFIED,
                             occurrence.actualAmount(), occurrence.variance(),
-                            occurrence.linkedTransaction() == null ? null : occurrence.linkedTransaction().id()
+                            linked == null ? null : linked.id(),
+                            linked == null ? null : linked.accountId(),
+                            linked == null ? null : linked.transactionDate()
                     );
-                }).toList();
+                })
+                .filter(commitment -> accountId == null || accountId.equals(
+                        commitment.linkedTransactionAccountId() == null
+                                ? commitment.accountId() : commitment.linkedTransactionAccountId()))
+                .toList();
     }
 }
