@@ -7,6 +7,7 @@ import com.personalfinance.personfinancerest.account.balance.BalanceSnapshotNotF
 import com.personalfinance.personfinancerest.account.management.FinancialAccountInUseException;
 import com.personalfinance.personfinancerest.account.management.FinancialAccountNotFoundException;
 import com.personalfinance.personfinancerest.account.management.InvalidAccountStatusException;
+import com.personalfinance.personfinancerest.account.management.InvalidFinancialAccountRequestException;
 import com.personalfinance.personfinancerest.category.CategoryNotFoundException;
 import com.personalfinance.personfinancerest.category.CategoryHierarchyConflictException;
 import com.personalfinance.personfinancerest.category.DuplicateCategoryNameException;
@@ -132,6 +133,11 @@ class ApiExceptionHandler {
     @ExceptionHandler(InvalidAccountStatusException.class)
     ResponseEntity<ApiError> handleInvalidAccountStatus(InvalidAccountStatusException exception) {
         return badRequest("Validation failed", Map.of("status", exception.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidFinancialAccountRequestException.class)
+    ResponseEntity<ApiError> handleInvalidFinancialAccountRequest(InvalidFinancialAccountRequestException exception) {
+        return badRequest("Validation failed", exception.getFieldErrors());
     }
 
     @ExceptionHandler(InvalidCategoryStatusException.class)

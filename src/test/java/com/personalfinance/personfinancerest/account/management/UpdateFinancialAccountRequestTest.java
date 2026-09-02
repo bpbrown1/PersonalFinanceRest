@@ -73,6 +73,26 @@ class UpdateFinancialAccountRequestTest {
         assertThat(invalidProperties(request)).containsExactly("currency");
     }
 
+    @Test
+    void acceptsInterestTermsAsAnInformationalUpdate() {
+        UpdateFinancialAccountRequest request = new UpdateFinancialAccountRequest(
+                null, null, null, null, null, new BigDecimal("4.250000"), InterestRateType.APY
+        );
+
+        assertThat(validator.validate(request)).isEmpty();
+        assertThat(request.isAnyFieldPresent()).isTrue();
+        assertThat(request.changesFinancialTerms()).isFalse();
+    }
+
+    @Test
+    void rejectsInterestRatesWithMoreThanSixFractionalDigits() {
+        UpdateFinancialAccountRequest request = new UpdateFinancialAccountRequest(
+                null, null, null, null, null, new BigDecimal("4.1234567"), InterestRateType.APY
+        );
+
+        assertThat(invalidProperties(request)).containsExactly("interestRate");
+    }
+
     private Set<String> invalidProperties(UpdateFinancialAccountRequest request) {
         return validator.validate(request).stream()
                 .map(ConstraintViolation::getPropertyPath)

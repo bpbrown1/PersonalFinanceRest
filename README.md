@@ -44,11 +44,15 @@ Do not use wildcard origins in a deployed environment.
   "type": "checking",
   "currency": "USD",
   "openingDate": "2026-08-20",
-  "openingBalance": 1250.75
+  "openingBalance": 1250.75,
+  "interestRate": 4.25,
+  "interestRateType": "apy"
 }
 ```
 
 `openingBalance` is optional and defaults to `0.00`. Supported account types are `checking`, `savings`, `cash`, `credit_card`, and `loan`.
+
+Classification is derived rather than accepted from the client: checking, savings, and cash accounts are `asset`; credit-card and loan accounts are `liability`. Optional interest terms must be supplied together. Checking and savings accounts support `apy`, credit-card and loan accounts support `apr`, and cash accounts do not support interest terms. Rates use percentage points with up to six fractional digits, so `4.250000` means 4.25%, not `0.0425`. The accepted range is `0.000000` through `999.999999`.
 
 Account currency is validated case-insensitively against the application's explicit current ISO 4217 allowlist and is stored in uppercase. Retrieve the same stable alphabetical list used by validation with:
 
@@ -68,10 +72,13 @@ A successful request returns `201 Created`, a `Location` header, and the created
   "ownerId": "00000000-0000-0000-0000-000000000001",
   "name": "Everyday Checking",
   "type": "checking",
+  "classification": "asset",
   "currency": "USD",
   "openingDate": "2026-08-20",
   "openingBalance": 1250.75,
   "currentBalance": 1250.75,
+  "interestRate": 4.250000,
+  "interestRateType": "apy",
   "status": "active",
   "archivedAt": null,
   "createdAt": "2026-08-22T18:30:00Z",
@@ -120,6 +127,8 @@ Snapshots are append-only. A backdated snapshot is retained without replacing a 
 ```
 
 Name and type remain editable after account activity exists. Currency, opening date, and opening balance may only change before financial activity references the account; conflicting changes return `409 Conflict`.
+
+Interest terms are informational and may be updated after activity exists without changing balances. A PATCH must include both `interestRate` and `interestRateType`; setting both to `null` clears the terms. Changing an account type while retaining interest terms is allowed only when those terms remain compatible with the new type.
 
 Account lifecycle operations are explicit and idempotent:
 

@@ -61,6 +61,20 @@ class FinancialAccountTest {
         assertThat(account.getOpeningBalance()).isEqualByComparingTo("1500.50");
     }
 
+    @Test
+    void storesInterestTermsWithoutChangingTheCurrentBalance() {
+        FinancialAccount account = account();
+
+        account.update(
+                account.getName(), account.getType(), account.getCurrency(), account.getOpeningDate(),
+                account.getOpeningBalance(), new BigDecimal("4.250000"), InterestRateType.APY
+        );
+
+        assertThat(account.getInterestRate()).isEqualByComparingTo("4.250000");
+        assertThat(account.getInterestRateType()).isEqualTo(InterestRateType.APY);
+        assertThat(account.getCurrentBalance()).isEqualByComparingTo("1250.75");
+    }
+
     private FinancialAccount account() {
         return new FinancialAccount(
                 UUID.randomUUID(),

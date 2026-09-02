@@ -14,6 +14,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -274,7 +275,7 @@ class BudgetProgressService {
     private Set<UUID> combinedTransactionIds(Set<UUID> first, Set<UUID> second) {
         LinkedHashSet<UUID> result = new LinkedHashSet<>(first);
         result.addAll(second);
-        return Set.copyOf(result);
+        return Collections.unmodifiableSet(result);
     }
 
     private void validateAccount(UUID ownerId, UUID accountId, String budgetCurrency) {
