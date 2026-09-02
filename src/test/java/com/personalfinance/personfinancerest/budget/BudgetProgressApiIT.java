@@ -114,6 +114,26 @@ class BudgetProgressApiIT {
                 .andExpect(jsonPath("$.lines[1].actual").value(80.0))
                 .andExpect(jsonPath("$.lines[1].remaining").value(-20.0))
                 .andExpect(jsonPath("$.lines[1].percentageUsed").value(133.33))
+                .andExpect(jsonPath("$.hierarchy[0].categoryId").value(parentId.toString()))
+                .andExpect(jsonPath("$.hierarchy[0].path[0].name").value("Food"))
+                .andExpect(jsonPath("$.hierarchy[0].allocationState").value("allocated"))
+                .andExpect(jsonPath("$.hierarchy[0].directTarget").value(40.0))
+                .andExpect(jsonPath("$.hierarchy[0].rollupTarget").value(100.0))
+                .andExpect(jsonPath("$.hierarchy[0].directActual").value(10.0))
+                .andExpect(jsonPath("$.hierarchy[0].rollupActual").value(90.0))
+                .andExpect(jsonPath("$.hierarchy[0].descendantAllocationCount").value(1))
+                .andExpect(jsonPath("$.hierarchy[0].children[0].categoryId").value(childId.toString()))
+                .andExpect(jsonPath("$.hierarchy[0].children[0].allocationState").value("allocated"))
+                .andExpect(jsonPath("$.hierarchy[0].children[0].directActual").value(35.0))
+                .andExpect(jsonPath("$.hierarchy[0].children[0].rollupActual").value(80.0))
+                .andExpect(jsonPath("$.hierarchy[0].children[0].children[0].categoryId")
+                        .value(leafId.toString()))
+                .andExpect(jsonPath("$.hierarchy[0].children[0].children[0].allocationState")
+                        .value("covered_by_ancestor"))
+                .andExpect(jsonPath("$.hierarchy[0].children[0].children[0].directActual").value(45.0))
+                .andExpect(jsonPath("$.hierarchy[1].categoryId").value(otherCategoryId.toString()))
+                .andExpect(jsonPath("$.hierarchy[1].allocationState").value("unbudgeted"))
+                .andExpect(jsonPath("$.hierarchy[1].directActual").value(30.0))
                 .andExpect(jsonPath("$.lines[1].drillDown.transactionIds.length()").value(4))
                 .andExpect(jsonPath("$.lines[1].drillDown.transactionsPath").value(
                         "/api/v1/budgets/" + budgetId
@@ -168,6 +188,28 @@ class BudgetProgressApiIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.items[0].id").value(uncategorized.toString()));
+    }
+
+    @Test
+    void recalculatesHistoricalRollupsAgainstTheCurrentCategoryHierarchy() throws Exception {
+        insertTransaction(ownerId, accountId, leafId, "25.00", "EXPENSE", "2026-08-15", null);
+
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress", budgetId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hierarchy[0].rollupActual").value(25.0))
+                .andExpect(jsonPath("$.hierarchy[1].rollupActual").value(0.0));
+
+        jdbcTemplate.update(
+                "UPDATE transaction_category SET parent_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                otherCategoryId, leafId
+        );
+
+        mockMvc.perform(get("/api/v1/budgets/{budgetId}/progress", budgetId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hierarchy[0].rollupActual").value(0.0))
+                .andExpect(jsonPath("$.hierarchy[1].rollupActual").value(25.0))
+                .andExpect(jsonPath("$.hierarchy[1].children[0].categoryId").value(leafId.toString()))
+                .andExpect(jsonPath("$.hierarchy[1].children[0].allocationState").value("unbudgeted"));
     }
 
     @Test
