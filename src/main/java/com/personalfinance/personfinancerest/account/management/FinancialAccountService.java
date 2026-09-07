@@ -42,7 +42,9 @@ class FinancialAccountService {
                 request.openingDate(),
                 MoneyValues.amountOrZero(request.openingBalance()),
                 interestRate,
-                request.interestRateType()
+                request.interestRateType(),
+                request.institutionName(),
+                request.accountNumberLastFour()
         );
 
         FinancialAccount savedAccount = repository.saveAndFlush(account);
@@ -71,6 +73,15 @@ class FinancialAccountService {
                 .orElseThrow(() -> new FinancialAccountNotFoundException(accountId));
     }
 
+    @Transactional(readOnly = true)
+    List<FinancialAccountResponse> findActiveNameMatches(String name) {
+        return repository.findAllByOwnerIdAndArchivedAtIsNullAndNormalizedNameOrderByCreatedAtAsc(
+                        currentUserProvider.userId(), AccountNames.normalizedName(name)
+                ).stream()
+                .map(FinancialAccountResponse::from)
+                .toList();
+    }
+
     @Transactional
     FinancialAccountResponse update(UUID accountId, UpdateFinancialAccountRequest request) {
         FinancialAccount account = findOwnedAccount(accountId);
@@ -89,6 +100,10 @@ class FinancialAccountService {
                 ? request.interestRate() : account.getInterestRate();
         InterestRateType interestRateType = request.hasInterestRateTypeField()
                 ? request.interestRateType() : account.getInterestRateType();
+        String institutionName = request.hasInstitutionNameField()
+                ? request.institutionName() : account.getInstitutionName();
+        String accountNumberLastFour = request.hasAccountNumberLastFourField()
+                ? request.accountNumberLastFour() : account.getAccountNumberLastFour();
         interestRate = AccountInterestTerms.validateAndNormalize(type, interestRate, interestRateType);
 
         account.update(
@@ -100,7 +115,9 @@ class FinancialAccountService {
                         ? account.getOpeningBalance()
                         : MoneyValues.amountOrZero(request.openingBalance()),
                 interestRate,
-                interestRateType
+                interestRateType,
+                institutionName,
+                accountNumberLastFour
         );
         if (request.openingBalance() != null) {
             account.recordCurrentBalance(account.getOpeningBalance());

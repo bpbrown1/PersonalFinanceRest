@@ -29,6 +29,7 @@ import com.personalfinance.personfinancerest.recurringexpense.InvalidRecurringEx
 import com.personalfinance.personfinancerest.recurringexpense.InvalidRecurringExpenseStatusException;
 import com.personalfinance.personfinancerest.recurringexpense.RecurringExpenseConflictException;
 import com.personalfinance.personfinancerest.recurringexpense.RecurringExpenseNotFoundException;
+import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -36,7 +37,6 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
-
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -237,6 +237,17 @@ class ApiExceptionHandler {
         exception.getBindingResult().getFieldErrors().forEach(error ->
                 fieldErrors.putIfAbsent(error.getField(), error.getDefaultMessage()));
 
+        return badRequest("Validation failed", fieldErrors);
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    ResponseEntity<ApiError> handleConstraintViolation(ConstraintViolationException exception) {
+        Map<String, String> fieldErrors = new LinkedHashMap<>();
+        exception.getConstraintViolations().forEach(violation -> {
+            String path = violation.getPropertyPath().toString();
+            String field = path.substring(path.lastIndexOf('.') + 1);
+            fieldErrors.putIfAbsent(field, violation.getMessage());
+        });
         return badRequest("Validation failed", fieldErrors);
     }
 

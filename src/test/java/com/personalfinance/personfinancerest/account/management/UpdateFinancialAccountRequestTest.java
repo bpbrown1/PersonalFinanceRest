@@ -93,6 +93,37 @@ class UpdateFinancialAccountRequestTest {
         assertThat(invalidProperties(request)).containsExactly("interestRate");
     }
 
+    @Test
+    void acceptsSafeIdentificationMetadataAsAnInformationalUpdate() {
+        UpdateFinancialAccountRequest request = new UpdateFinancialAccountRequest();
+        request.setInstitutionName("Example Bank");
+        request.setAccountNumberLastFour("1234");
+
+        assertThat(validator.validate(request)).isEmpty();
+        assertThat(request.isAnyFieldPresent()).isTrue();
+        assertThat(request.changesFinancialTerms()).isFalse();
+    }
+
+    @Test
+    void permitsIdentificationMetadataToBeClearedExplicitly() {
+        UpdateFinancialAccountRequest request = new UpdateFinancialAccountRequest();
+        request.setInstitutionName(null);
+        request.setAccountNumberLastFour(null);
+
+        assertThat(validator.validate(request)).isEmpty();
+        assertThat(request.isAnyFieldPresent()).isTrue();
+    }
+
+    @Test
+    void rejectsBlankInstitutionAndUnsafeAccountNumberSuffixes() {
+        UpdateFinancialAccountRequest request = new UpdateFinancialAccountRequest();
+        request.setInstitutionName(" ");
+        request.setAccountNumberLastFour("12A4");
+
+        assertThat(invalidProperties(request))
+                .containsExactlyInAnyOrder("institutionName", "accountNumberLastFour");
+    }
+
     private Set<String> invalidProperties(UpdateFinancialAccountRequest request) {
         return validator.validate(request).stream()
                 .map(ConstraintViolation::getPropertyPath)

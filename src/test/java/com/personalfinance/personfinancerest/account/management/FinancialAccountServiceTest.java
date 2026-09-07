@@ -77,7 +77,9 @@ class FinancialAccountServiceTest {
                 LocalDate.of(2026, 8, 20),
                 null,
                 new BigDecimal("4.25"),
-                InterestRateType.APY
+                InterestRateType.APY,
+                " Example Bank ",
+                "1234"
         ));
 
         assertThat(response.ownerId()).isEqualTo(ownerId);
@@ -87,6 +89,8 @@ class FinancialAccountServiceTest {
         assertThat(response.classification()).isEqualTo(AccountClassification.ASSET);
         assertThat(response.interestRate()).isEqualByComparingTo("4.250000");
         assertThat(response.interestRateType()).isEqualTo(InterestRateType.APY);
+        assertThat(response.institutionName()).isEqualTo("Example Bank");
+        assertThat(response.accountNumberLastFour()).isEqualTo("1234");
         verify(openingBalanceHistory).createFor(any(FinancialAccount.class));
     }
 
@@ -120,6 +124,18 @@ class FinancialAccountServiceTest {
         assertThat(service.findAll(AccountStatusFilter.ALL)).hasSize(1);
 
         verify(repository).findAllByOwnerIdOrderByCreatedAtAsc(ownerId);
+    }
+
+    @Test
+    void findsActiveDuplicateNamesWithinTheCurrentOwnerBoundary() {
+        given(currentUserProvider.userId()).willReturn(ownerId);
+        given(repository.findAllByOwnerIdAndArchivedAtIsNullAndNormalizedNameOrderByCreatedAtAsc(
+                ownerId, "everyday checking"
+        )).willReturn(List.of(account));
+
+        assertThat(service.findActiveNameMatches(" Everyday CHECKING "))
+                .extracting(FinancialAccountResponse::id)
+                .containsExactly(accountId);
     }
 
     @Test
@@ -186,6 +202,21 @@ class FinancialAccountServiceTest {
         assertThat(response.interestRate()).isEqualByComparingTo("3.500000");
         assertThat(response.interestRateType()).isEqualTo(InterestRateType.APY);
         assertThat(response.currentBalance()).isEqualByComparingTo("1250.75");
+        verifyNoInteractions(financialAccountActivity);
+    }
+
+    @Test
+    void updatesSafeIdentificationMetadataWithoutCheckingAccountActivity() {
+        givenOwnedAccount();
+        given(repository.saveAndFlush(account)).willReturn(account);
+        UpdateFinancialAccountRequest request = new UpdateFinancialAccountRequest();
+        request.setInstitutionName(" Example Credit Union ");
+        request.setAccountNumberLastFour("4321");
+
+        FinancialAccountResponse response = service.update(accountId, request);
+
+        assertThat(response.institutionName()).isEqualTo("Example Credit Union");
+        assertThat(response.accountNumberLastFour()).isEqualTo("4321");
         verifyNoInteractions(financialAccountActivity);
     }
 

@@ -27,17 +27,26 @@ class DevelopmentDataIT {
     void loadsARepresentativeDevelopmentDataset() throws Exception {
         mockMvc.perform(get("/api/v1/accounts").queryParam("status", "all"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(4))
+                .andExpect(jsonPath("$.length()").value(5))
                 .andExpect(jsonPath("$[?(@.name == 'Everyday Checking')].currentBalance")
-                        .value(org.hamcrest.Matchers.contains(5026.35)))
+                        .value(org.hamcrest.Matchers.containsInAnyOrder(5026.35, 850.0)))
+                .andExpect(jsonPath("$[?(@.name == 'Everyday Checking')].institutionName")
+                        .value(org.hamcrest.Matchers.containsInAnyOrder("Example Bank", "Example Credit Union")))
+                .andExpect(jsonPath("$[?(@.name == 'Everyday Checking')].accountNumberLastFour")
+                        .value(org.hamcrest.Matchers.containsInAnyOrder("1234", "4321")))
                 .andExpect(jsonPath("$[?(@.name == 'Everyday Checking')].classification")
-                        .value(org.hamcrest.Matchers.contains("asset")))
+                        .value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.equalTo("asset"))))
                 .andExpect(jsonPath("$[?(@.name == 'Emergency Savings')].interestRate")
                         .value(org.hamcrest.Matchers.contains(4.25)))
                 .andExpect(jsonPath("$[?(@.name == 'Previous Credit Card')].classification")
                         .value(org.hamcrest.Matchers.contains("liability")))
                 .andExpect(jsonPath("$[?(@.name == 'Previous Credit Card')].interestRateType")
                         .value(org.hamcrest.Matchers.contains("apr")));
+
+        mockMvc.perform(get("/api/v1/accounts/name-matches")
+                        .queryParam("name", "EVERYDAY CHECKING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2));
 
         mockMvc.perform(get("/api/v1/categories").queryParam("status", "all"))
                 .andExpect(status().isOk())
