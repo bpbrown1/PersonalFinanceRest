@@ -12,6 +12,16 @@ The API runs at `http://localhost:8080` by default. All public application endpo
 
 Run unit tests with `./mvnw test`. Run unit and integration tests with `./mvnw verify`.
 
+To run against a local PostgreSQL database, activate `postgres-test` and provide credentials through the environment:
+
+```bash
+PERSONAL_FINANCE_DB_USERNAME=personal_finance_app_user \
+PERSONAL_FINANCE_DB_PASSWORD='replace-me' \
+SPRING_PROFILES_ACTIVE=postgres-test ./mvnw spring-boot:run
+```
+
+`PERSONAL_FINANCE_DB_URL` optionally overrides the default `jdbc:postgresql://localhost:5432/personal_finance`. Configure the same variables in an IDE Run/Debug configuration. Database credentials must not be committed to an application properties file.
+
 ### Development sample data
 
 Activate the `dev` Spring profile to start the in-memory H2 database with representative sample data:
@@ -472,6 +482,30 @@ An abridged progress response is shaped for both summary cards and line-item dri
       }
     }
   ],
+  "hierarchy": [
+    {
+      "categoryId": "30000000-0000-0000-0000-000000000004",
+      "categoryName": "Housing",
+      "path": [
+        {"categoryId": "30000000-0000-0000-0000-000000000004", "name": "Housing"}
+      ],
+      "categoryStatus": "active",
+      "allocationState": "allocated",
+      "lineId": "71000000-0000-0000-0000-000000000002",
+      "directPlanned": 200.00,
+      "directScheduledTarget": 209.99,
+      "directTarget": 409.99,
+      "rollupTarget": 409.99,
+      "directFlexibleActual": 0.00,
+      "directBillActual": 84.99,
+      "directActual": 84.99,
+      "rollupActual": 84.99,
+      "remaining": 325.00,
+      "percentageUsed": 20.73,
+      "descendantAllocationCount": 0,
+      "children": []
+    }
+  ],
   "unbudgetedCommitments": [
     {
       "categoryId": "30000000-0000-0000-0000-000000000008",
@@ -511,6 +545,12 @@ Budget progress is recalculated from active expense transactions and derived rec
 Flexible line plans and scheduled targets are additive: `totalBudgeted = planned + scheduledTarget`. `flexibleActual` contains unmatched actual assigned to flexible lines, `billActual` contains satisfied recurring-component actual, `budgetedActual` is their sum, and `unbudgetedActual` contains only unrelated unplanned activity. `percentSpent = totalActual / totalBudgeted`. `projectedUsage = totalActual + outstandingScheduledTarget`; a satisfied occurrence contributes its linked actual and removes its target from the outstanding amount, so it is never counted twice. `remaining` and `projectedRemaining` subtract actual and projected usage from total budgeted. Percentages use fixed-decimal arithmetic with two decimal places and remain null when the relevant target is zero. The legacy `committed`, `remainingAfterCommitments`, `underfunded`, and `percentageUsed` fields remain for compatibility; `committed` aliases scheduled target and `percentageUsed` aliases percent spent.
 
 The top-level `components` collection is the canonical flat view. Each active flexible line produces a `source=flexible` component keyed by `line:{lineId}`. Each in-period occurrence produces a derived `source=recurring` component keyed by `occurrence:{occurrenceKey}`; no `BudgetLine` is persisted or fabricated. Recurring components expose target, actual, remaining, percentage, projected values, outstanding/satisfied state, variance, linked transaction, and an exact drill-down. A matched transaction is allocated to its bill component before flexible or unplanned classification. Consequently, an unrelated transaction in the same category remains unplanned without absorbing or duplicating the bill payment.
+
+The additive `hierarchy` collection is the canonical recursive category view. Roots and children are ordered case-insensitively by category name with category ID as the stable tie-breaker. Every node contains its stable identity, full root-to-node path, lifecycle status, optional active line ID, direct values for that exact category, and rollup values equal to the node plus every descendant. `directTarget = directPlanned + directScheduledTarget`; `directActual = directFlexibleActual + directBillActual`. `remaining` and `percentageUsed` use rollup target and actual, with a null percentage for a zero rollup target. `descendantAllocationCount` counts active allocated descendants without including the current node.
+
+`allocationState` is `allocated` when the exact category has an active budget line, `covered_by_ancestor` when its nearest active line is an ancestor, and `unbudgeted` when neither it nor any ancestor has a line. A child allocation remains independent from a parent allocation: both direct targets appear once and the parent rollup adds them. Actual consumption still goes to the closest allocated category, while exact-category direct actuals and recursive rollups make the hierarchy explainable without duplicating the transaction. Scheduled targets and their matched bill actuals use the same rule; a matched payment is excluded from flexible actual before rollup.
+
+Hierarchy calculations use the category tree as it exists when progress is requested. Reparenting does not rewrite transaction, split, budget-line, or recurring-expense category IDs, but it immediately changes current and historical recursive rollups and allocation coverage. Archived categories remain in the tree with `categoryStatus=archived`, preserving retained relationships. Missing parents or circular retained data produce a conflict rather than silently dropping nodes. The flat `lines`, `components`, `unbudgeted`, and `unbudgetedCommitments` fields remain unchanged for existing clients.
 
 Only active budget lines receive aggregate line progress. A line includes its category and descendants. When parent and child lines overlap, each unmatched allocation and occurrence goes to the closest matching line (then line position), preventing duplicate lines and double counting. Line responses distinguish `flexibleActual` and `billActual` while retaining `actual` as their sum. Scheduled targets without a flexible line remain in enriched `unbudgetedCommitments` rows, while unmatched and uncategorized spending remains in separate `unbudgeted` rows. Negative remaining and percentages above 100 are preserved. Every component, line, and unbudgeted row includes stable contributing transaction IDs and drill-down metadata.
 

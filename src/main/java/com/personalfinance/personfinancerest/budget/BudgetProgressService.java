@@ -73,6 +73,8 @@ class BudgetProgressService {
         Map<UUID, MutableCommitments> lineCommitments = new LinkedHashMap<>();
         activeLines.forEach(line -> lineCommitments.put(line.getId(), new MutableCommitments()));
         Map<UUID, MutableCommitments> unbudgetedCommitments = new LinkedHashMap<>();
+        Map<UUID, MutableCategoryProgress> categoryProgress = new LinkedHashMap<>();
+        categories.forEach(category -> categoryProgress.put(category.getId(), new MutableCategoryProgress()));
 
         List<BudgetScheduledCommitment> commitments = commitmentSource.findScheduledCommitments(
                 ownerId, budget.getCurrency(), budget.getStartDate(), budget.getEndDate(), accountId
@@ -87,6 +89,13 @@ class BudgetProgressService {
                             commitment.categoryId(), ignored -> new MutableCommitments())
                     : lineCommitments.get(line.getId());
             target.add(commitment);
+            MutableCategoryProgress exactCategory = categoryProgress.get(commitment.categoryId());
+            if (exactCategory != null) {
+                exactCategory.scheduledTarget = exactCategory.scheduledTarget.add(commitment.amount());
+                if (commitment.satisfied() && commitment.actualAmount() != null) {
+                    exactCategory.billActual = exactCategory.billActual.add(commitment.actualAmount());
+                }
+            }
             if (commitment.satisfied() && commitment.linkedTransactionId() != null) {
                 commitmentByLinkedTransaction.put(commitment.linkedTransactionId(), commitment);
             }
@@ -107,7 +116,22 @@ class BudgetProgressService {
                     ? unbudgeted.computeIfAbsent(allocation.categoryId(), ignored -> new MutableProgress())
                     : lineProgress.get(line.getId());
             target.add(allocation.amount(), allocation.transactionId());
+            MutableCategoryProgress exactCategory = categoryProgress.get(allocation.categoryId());
+            if (exactCategory != null) {
+                exactCategory.flexibleActual = exactCategory.flexibleActual.add(allocation.amount());
+            }
         }
+
+        activeLines.forEach(line -> {
+            MutableCategoryProgress exactCategory = categoryProgress.get(line.getCategoryId());
+            if (exactCategory == null) {
+                throw new BudgetConflictException(
+                        "Budget line references a missing category: " + line.getCategoryId()
+                );
+            }
+            exactCategory.line = line;
+            exactCategory.planned = line.getPlannedAmount();
+        });
 
         List<BudgetLineProgressResponse> lines = activeLines.stream().map(line -> {
             MutableProgress progress = lineProgress.get(line.getId());
@@ -193,6 +217,7 @@ class BudgetProgressService {
                 .map(BudgetScheduledCommitment::linkedTransactionId)
                 .filter(java.util.Objects::nonNull)
                 .forEach(allTransactionIds::add);
+        List<BudgetCategoryProgressResponse> hierarchy = buildHierarchy(categories, categoryProgress);
 
         return new BudgetProgressResponse(
                 budget.getId(), ownerId, budget.getCurrency(), budget.getStartDate(), budget.getEndDate(),
@@ -204,10 +229,105 @@ class BudgetProgressService {
                 percentage(totalActual, totalBudgeted), projectedUsage,
                 totalBudgeted.subtract(projectedUsage), percentage(projectedUsage, totalBudgeted),
                 lines, List.copyOf(components), unbudgetedRows,
-                unbudgetedCommitmentRows,
+                unbudgetedCommitmentRows, hierarchy,
                 drillDown(budget, accountId,
                         filterCategoryIds == null ? Set.of() : filterCategoryIds, allTransactionIds,
                         "overall", null, categoryId, false)
+        );
+    }
+
+    private List<BudgetCategoryProgressResponse> buildHierarchy(
+            List<TransactionCategory> categories,
+            Map<UUID, MutableCategoryProgress> progressByCategory
+    ) {
+        List<TransactionCategory> orderedCategories = categories.stream()
+                .sorted(Comparator.comparing(TransactionCategory::getName, String.CASE_INSENSITIVE_ORDER)
+                        .thenComparing(category -> category.getId().toString()))
+                .toList();
+        Map<UUID, TransactionCategory> categoryById = new LinkedHashMap<>();
+        Map<UUID, List<TransactionCategory>> childrenByParent = new LinkedHashMap<>();
+        List<TransactionCategory> roots = new ArrayList<>();
+        for (TransactionCategory category : orderedCategories) {
+            categoryById.put(category.getId(), category);
+        }
+        for (TransactionCategory category : orderedCategories) {
+            if (category.getParentId() == null) {
+                roots.add(category);
+            } else {
+                if (!categoryById.containsKey(category.getParentId())) {
+                    throw new BudgetConflictException(
+                            "Category hierarchy is incomplete at parent: " + category.getParentId()
+                    );
+                }
+                childrenByParent.computeIfAbsent(category.getParentId(), ignored -> new ArrayList<>())
+                        .add(category);
+            }
+        }
+
+        Set<UUID> built = new LinkedHashSet<>();
+        List<BudgetCategoryProgressResponse> hierarchy = roots.stream()
+                .map(root -> buildCategoryProgress(
+                        root, childrenByParent, progressByCategory, List.of(), false,
+                        new LinkedHashSet<>(), built
+                ))
+                .toList();
+        if (built.size() != orderedCategories.size()) {
+            throw new BudgetConflictException("Category hierarchy contains a circular relationship");
+        }
+        return hierarchy;
+    }
+
+    private BudgetCategoryProgressResponse buildCategoryProgress(
+            TransactionCategory category,
+            Map<UUID, List<TransactionCategory>> childrenByParent,
+            Map<UUID, MutableCategoryProgress> progressByCategory,
+            List<BudgetCategoryPathSegment> parentPath,
+            boolean hasAllocatedAncestor,
+            Set<UUID> activePath,
+            Set<UUID> built
+    ) {
+        if (!activePath.add(category.getId())) {
+            throw new BudgetConflictException(
+                    "Category hierarchy contains a circular relationship at: " + category.getId()
+            );
+        }
+        MutableCategoryProgress direct = progressByCategory.get(category.getId());
+        boolean allocated = direct.line != null;
+        List<BudgetCategoryPathSegment> path = new ArrayList<>(parentPath);
+        path.add(new BudgetCategoryPathSegment(category.getId(), category.getName()));
+        List<BudgetCategoryProgressResponse> children = childrenByParent
+                .getOrDefault(category.getId(), List.of()).stream()
+                .map(child -> buildCategoryProgress(
+                        child, childrenByParent, progressByCategory, path,
+                        hasAllocatedAncestor || allocated, activePath, built
+                ))
+                .toList();
+
+        BigDecimal directTarget = direct.planned.add(direct.scheduledTarget);
+        BigDecimal directActual = direct.flexibleActual.add(direct.billActual);
+        BigDecimal rollupTarget = children.stream()
+                .map(BudgetCategoryProgressResponse::rollupTarget)
+                .reduce(directTarget, BigDecimal::add);
+        BigDecimal rollupActual = children.stream()
+                .map(BudgetCategoryProgressResponse::rollupActual)
+                .reduce(directActual, BigDecimal::add);
+        int descendantAllocationCount = children.stream()
+                .mapToInt(child -> child.descendantAllocationCount()
+                        + (child.allocationState() == BudgetAllocationState.ALLOCATED ? 1 : 0))
+                .sum();
+
+        activePath.remove(category.getId());
+        built.add(category.getId());
+        return new BudgetCategoryProgressResponse(
+                category.getId(), category.getName(), List.copyOf(path), category.getStatus(),
+                allocated ? BudgetAllocationState.ALLOCATED
+                        : hasAllocatedAncestor ? BudgetAllocationState.COVERED_BY_ANCESTOR
+                        : BudgetAllocationState.UNBUDGETED,
+                allocated ? direct.line.getId() : null,
+                direct.planned, direct.scheduledTarget, directTarget, rollupTarget,
+                direct.flexibleActual, direct.billActual, directActual, rollupActual,
+                rollupTarget.subtract(rollupActual), percentage(rollupActual, rollupTarget),
+                descendantAllocationCount, children
         );
     }
 
@@ -394,5 +514,13 @@ class BudgetProgressService {
             }
             items.add(commitment);
         }
+    }
+
+    private static final class MutableCategoryProgress {
+        private BudgetLine line;
+        private BigDecimal planned = ZERO;
+        private BigDecimal scheduledTarget = ZERO;
+        private BigDecimal flexibleActual = ZERO;
+        private BigDecimal billActual = ZERO;
     }
 }

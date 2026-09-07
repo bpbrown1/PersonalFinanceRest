@@ -126,6 +126,18 @@ class DevelopmentDataIT {
                         .value(org.hamcrest.Matchers.contains("satisfied")))
                 .andExpect(jsonPath("$.components[?(@.name == 'Home internet')].actual")
                         .value(org.hamcrest.Matchers.contains(84.99)))
+                .andExpect(jsonPath("$.hierarchy[0].categoryName").value("Food"))
+                .andExpect(jsonPath("$.hierarchy[0].allocationState").value("allocated"))
+                .andExpect(jsonPath("$.hierarchy[0].rollupTarget").value(600.0))
+                .andExpect(jsonPath("$.hierarchy[0].rollupActual").value(153.65))
+                .andExpect(jsonPath("$.hierarchy[0].children.length()").value(2))
+                .andExpect(jsonPath("$.hierarchy[0].children[*].allocationState")
+                        .value(org.hamcrest.Matchers.everyItem(
+                                org.hamcrest.Matchers.equalTo("covered_by_ancestor"))))
+                .andExpect(jsonPath("$.hierarchy[2].categoryName").value("Interest"))
+                .andExpect(jsonPath("$.hierarchy[3].categoryName").value("Legacy Fees"))
+                .andExpect(jsonPath("$.hierarchy[3].categoryStatus").value("archived"))
+                .andExpect(jsonPath("$.hierarchy[3].allocationState").value("unbudgeted"))
                 .andExpect(jsonPath("$.unbudgeted[?(@.categoryId == "
                                 + "'30000000-0000-0000-0000-000000000008')].actual")
                         .value(org.hamcrest.Matchers.contains(12.0)));

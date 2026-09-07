@@ -1,6 +1,7 @@
 package com.personalfinance.personfinancerest.budget;
 
 import com.personalfinance.personfinancerest.account.management.FinancialAccountRepository;
+import com.personalfinance.personfinancerest.category.CategoryStatus;
 import com.personalfinance.personfinancerest.category.TransactionCategory;
 import com.personalfinance.personfinancerest.category.TransactionCategoryRepository;
 import com.personalfinance.personfinancerest.user.CurrentUserProvider;
@@ -99,6 +100,62 @@ class BudgetProgressServiceTest {
             assertThat(row.categoryId()).isEqualTo(unbudgetedId);
             assertThat(row.actual()).isEqualByComparingTo("12.00");
         });
+        assertThat(response.hierarchy()).hasSize(2);
+        BudgetCategoryProgressResponse parentNode = hierarchyNode(response, parentId);
+        assertThat(parentNode.categoryId()).isEqualTo(parentId);
+        assertThat(parentNode.allocationState()).isEqualTo(BudgetAllocationState.ALLOCATED);
+        assertThat(parentNode.directTarget()).isEqualByComparingTo("40.00");
+        assertThat(parentNode.rollupTarget()).isEqualByComparingTo("60.00");
+        assertThat(parentNode.directActual()).isEqualByComparingTo("10.00");
+        assertThat(parentNode.rollupActual()).isEqualByComparingTo("35.00");
+        assertThat(parentNode.descendantAllocationCount()).isEqualTo(1);
+        BudgetCategoryProgressResponse childNode = parentNode.children().getFirst();
+        assertThat(childNode.allocationState()).isEqualTo(BudgetAllocationState.ALLOCATED);
+        assertThat(childNode.directActual()).isEqualByComparingTo("0.00");
+        assertThat(childNode.rollupActual()).isEqualByComparingTo("25.00");
+        assertThat(childNode.children().getFirst().allocationState())
+                .isEqualTo(BudgetAllocationState.COVERED_BY_ANCESTOR);
+        assertThat(childNode.children().getFirst().directActual()).isEqualByComparingTo("25.00");
+        assertThat(hierarchyNode(response, unbudgetedId).allocationState())
+                .isEqualTo(BudgetAllocationState.UNBUDGETED);
+    }
+
+    @Test
+    void rollsDeepSpendingIntoARootOnlyAllocationWithoutCountingItTwice() {
+        Budget budget = new Budget(
+                budgetId, ownerId, "August", "USD",
+                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31)
+        );
+        budget.addLine(parentId, amount("100.00"));
+        TransactionCategory parent = category(parentId, null);
+        TransactionCategory child = category(childId, parentId);
+        TransactionCategory leaf = category(leafId, childId);
+        when(leaf.getStatus()).thenReturn(CategoryStatus.ARCHIVED);
+        when(budgetRepository.findByIdAndOwnerId(budgetId, ownerId)).thenReturn(Optional.of(budget));
+        when(categoryRepository.findAllByOwnerIdOrderByNormalizedNameAsc(ownerId))
+                .thenReturn(List.of(parent, child, leaf));
+        when(spendingSource.findExpenseAllocations(
+                ownerId, "USD", budget.getStartDate(), budget.getEndDate(), null
+        )).thenReturn(List.of(
+                allocation(UUID.randomUUID(), parentId, "10.00"),
+                allocation(UUID.randomUUID(), leafId, "30.00")
+        ));
+
+        BudgetProgressResponse response = service.calculate(budgetId, null, null);
+
+        assertThat(response.lines()).singleElement()
+                .extracting(BudgetLineProgressResponse::actual).isEqualTo(amount("40.00"));
+        assertThat(response.totalActual()).isEqualByComparingTo("40.00");
+        BudgetCategoryProgressResponse root = response.hierarchy().getFirst();
+        assertThat(root.rollupActual()).isEqualByComparingTo("40.00");
+        assertThat(root.children().getFirst().allocationState())
+                .isEqualTo(BudgetAllocationState.COVERED_BY_ANCESTOR);
+        assertThat(root.children().getFirst().children().getFirst().allocationState())
+                .isEqualTo(BudgetAllocationState.COVERED_BY_ANCESTOR);
+        assertThat(root.children().getFirst().children().getFirst().categoryStatus())
+                .isEqualTo(CategoryStatus.ARCHIVED);
+        assertThat(root.children().getFirst().children().getFirst().directActual())
+                .isEqualByComparingTo("30.00");
     }
 
     @Test
@@ -165,6 +222,10 @@ class BudgetProgressServiceTest {
             assertThat(row.categoryId()).isEqualTo(unbudgetedId);
             assertThat(row.committed()).isEqualByComparingTo("20.00");
         });
+        assertThat(hierarchyNode(response, parentId).rollupTarget()).isEqualByComparingTo("105.00");
+        assertThat(hierarchyNode(response, parentId).children().getFirst().directScheduledTarget())
+                .isEqualByComparingTo("55.00");
+        assertThat(hierarchyNode(response, unbudgetedId).directScheduledTarget()).isEqualByComparingTo("20.00");
     }
 
     @Test
@@ -327,11 +388,40 @@ class BudgetProgressServiceTest {
                 });
     }
 
+    @Test
+    void rejectsAnIncompleteHierarchyRatherThanSilentlyDroppingANestedCategory() {
+        Budget budget = new Budget(
+                budgetId, ownerId, "August", "USD",
+                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31)
+        );
+        UUID missingParentId = UUID.randomUUID();
+        TransactionCategory orphan = category(childId, missingParentId);
+        when(budgetRepository.findByIdAndOwnerId(budgetId, ownerId)).thenReturn(Optional.of(budget));
+        when(categoryRepository.findAllByOwnerIdOrderByNormalizedNameAsc(ownerId))
+                .thenReturn(List.of(orphan));
+        when(spendingSource.findExpenseAllocations(
+                ownerId, "USD", budget.getStartDate(), budget.getEndDate(), null
+        )).thenReturn(List.of());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.calculate(budgetId, null, null))
+                .isInstanceOf(BudgetConflictException.class)
+                .hasMessageContaining(missingParentId.toString());
+    }
+
     private TransactionCategory category(UUID id, UUID parentId) {
         TransactionCategory category = mock(TransactionCategory.class);
         when(category.getId()).thenReturn(id);
         when(category.getParentId()).thenReturn(parentId);
+        when(category.getName()).thenReturn(id.toString());
+        when(category.getStatus()).thenReturn(CategoryStatus.ACTIVE);
         return category;
+    }
+
+    private BudgetCategoryProgressResponse hierarchyNode(BudgetProgressResponse response, UUID categoryId) {
+        return response.hierarchy().stream()
+                .filter(node -> node.categoryId().equals(categoryId))
+                .findFirst()
+                .orElseThrow();
     }
 
     private BudgetSpendingAllocation allocation(UUID transactionId, UUID categoryId, String amount) {
