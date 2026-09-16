@@ -75,6 +75,33 @@ class FinancialAccountTest {
         assertThat(account.getCurrentBalance()).isEqualByComparingTo("1250.75");
     }
 
+    @Test
+    void storesOnlySafeIdentificationMetadataAndKeepsItInformational() {
+        FinancialAccount account = account();
+
+        account.update(
+                account.getName(), account.getType(), account.getCurrency(), account.getOpeningDate(),
+                account.getOpeningBalance(), null, null, " Example Bank ", "1234"
+        );
+
+        assertThat(account.getInstitutionName()).isEqualTo("Example Bank");
+        assertThat(account.getAccountNumberLastFour()).isEqualTo("1234");
+        assertThat(account.getCurrentBalance()).isEqualByComparingTo("1250.75");
+    }
+
+    @Test
+    void keepsASeparateNormalizedNameForDuplicateLookup() {
+        FinancialAccount account = account();
+
+        account.update(
+                " Everyday CHECKING ", account.getType(), account.getCurrency(), account.getOpeningDate(),
+                account.getOpeningBalance()
+        );
+
+        assertThat(account.getName()).isEqualTo("Everyday CHECKING");
+        assertThat(account.getNormalizedName()).isEqualTo("everyday checking");
+    }
+
     private FinancialAccount account() {
         return new FinancialAccount(
                 UUID.randomUUID(),

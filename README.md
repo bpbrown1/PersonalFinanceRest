@@ -30,7 +30,7 @@ Activate the `dev` Spring profile to start the in-memory H2 database with repres
 SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 ```
 
-The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts, opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, same-currency and cross-currency transfers, monthly budgets, and monthly, semiannual, yearly, and archived recurring expenses. August home internet is explicitly matched to a lower actual transaction, while an unrelated video rental shares its category, so the UI can demonstrate satisfied and outstanding bill components alongside correctly separated unplanned spending. An archived July plan is available as a copy source; August is already occupied and September is initially free. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
+The profile adds `classpath:dev/db/migration` to Flyway's normal migration locations. Its repeatable seed migration loads deterministic accounts—including two active accounts named Everyday Checking with different safe identification metadata—opening and manual balance history, active and archived categories, a category hierarchy, USD and EUR activity, active and recoverably deleted transactions, an ordered split transaction, same-currency and cross-currency transfers, monthly budgets, and monthly, semiannual, yearly, and archived recurring expenses. August home internet is explicitly matched to a lower actual transaction, while an unrelated video rental shares its category, so the UI can demonstrate satisfied and outstanding bill components alongside correctly separated unplanned spending. An archived July plan is available as a copy source; August is already occupied and September is initially free. The database is still discarded when the application process stops, so every new run starts from the same useful scenario.
 
 Production migrations remain in `db/migration`; sample data must stay under `dev/db/migration`. When a feature adds required tables, relationships, or useful frontend states, update the development seed and `DevelopmentDataIT` together. The fixed seed UUIDs should remain stable unless a relationship is intentionally replaced.
 
@@ -51,6 +51,8 @@ Do not use wildcard origins in a deployed environment.
 ```json
 {
   "name": "Everyday Checking",
+  "institutionName": "Example Bank",
+  "accountNumberLastFour": "1234",
   "type": "checking",
   "currency": "USD",
   "openingDate": "2026-08-20",
@@ -61,6 +63,8 @@ Do not use wildcard origins in a deployed environment.
 ```
 
 `openingBalance` is optional and defaults to `0.00`. Supported account types are `checking`, `savings`, `cash`, `credit_card`, and `loan`.
+
+`institutionName` and `accountNumberLastFour` are optional identification metadata. Institution names are trimmed and limited to 100 characters. The suffix must contain exactly four digits. The API has no full-account-number field, rejects unknown request fields, and must never receive, persist, log, or return a complete account number.
 
 Classification is derived rather than accepted from the client: checking, savings, and cash accounts are `asset`; credit-card and loan accounts are `liability`. Optional interest terms must be supplied together. Checking and savings accounts support `apy`, credit-card and loan accounts support `apr`, and cash accounts do not support interest terms. Rates use percentage points with up to six fractional digits, so `4.250000` means 4.25%, not `0.0425`. The accepted range is `0.000000` through `999.999999`.
 
@@ -81,6 +85,8 @@ A successful request returns `201 Created`, a `Location` header, and the created
   "id": "0dfae49e-6765-4f9f-b485-53d17338a106",
   "ownerId": "00000000-0000-0000-0000-000000000001",
   "name": "Everyday Checking",
+  "institutionName": "Example Bank",
+  "accountNumberLastFour": "1234",
   "type": "checking",
   "classification": "asset",
   "currency": "USD",
@@ -102,6 +108,12 @@ A successful request returns `201 Created`, a `Location` header, and the created
 - `GET /api/v1/accounts?status=archived` returns archived accounts.
 - `GET /api/v1/accounts?status=all` returns active and archived accounts.
 - `GET /api/v1/accounts/{accountId}` returns one account owned by the current user.
+
+Duplicate account names remain valid. Clients can request active accounts owned by the current user whose names match after trimming and case normalization:
+
+`GET /api/v1/accounts/name-matches?name=Everyday%20Checking`
+
+The endpoint returns the same account response array used by account lists. Archived and other users' accounts are excluded. An empty array means there is no active match. This lookup is advisory and never blocks account creation.
 
 `currentBalance` initially equals `openingBalance` and changes by the signed impact of active transactions.
 
@@ -132,13 +144,15 @@ Snapshots are append-only. A backdated snapshot is retained without replacing a 
 ```json
 {
   "name": "Primary Checking",
+  "institutionName": "Example Credit Union",
+  "accountNumberLastFour": "4321",
   "type": "checking"
 }
 ```
 
 Name and type remain editable after account activity exists. Currency, opening date, and opening balance may only change before financial activity references the account; conflicting changes return `409 Conflict`.
 
-Interest terms are informational and may be updated after activity exists without changing balances. A PATCH must include both `interestRate` and `interestRateType`; setting both to `null` clears the terms. Changing an account type while retaining interest terms is allowed only when those terms remain compatible with the new type.
+Interest terms and safe identification metadata are informational and may be updated after activity exists without changing balances. A PATCH must include both `interestRate` and `interestRateType`; setting both to `null` clears the terms. Institution name and last four may each be cleared explicitly with `null`. Changing an account type while retaining interest terms is allowed only when those terms remain compatible with the new type.
 
 Account lifecycle operations are explicit and idempotent:
 

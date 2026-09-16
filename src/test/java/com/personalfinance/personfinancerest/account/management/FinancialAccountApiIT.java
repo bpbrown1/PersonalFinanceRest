@@ -78,7 +78,9 @@ class FinancialAccountApiIT {
                                   "openingDate": "2026-08-20",
                                   "openingBalance": 1250.75,
                                   "interestRate": 4.25,
-                                  "interestRateType": "apy"
+                                  "interestRateType": "apy",
+                                  "institutionName": " Example Bank ",
+                                  "accountNumberLastFour": "1234"
                                 }
                                 """))
                 .andExpect(status().isCreated())
@@ -86,6 +88,8 @@ class FinancialAccountApiIT {
                 .andExpect(jsonPath("$.id").isNotEmpty())
                 .andExpect(jsonPath("$.ownerId").value(currentUserProvider.userId().toString()))
                 .andExpect(jsonPath("$.name").value("Everyday Checking"))
+                .andExpect(jsonPath("$.institutionName").value("Example Bank"))
+                .andExpect(jsonPath("$.accountNumberLastFour").value("1234"))
                 .andExpect(jsonPath("$.type").value("checking"))
                 .andExpect(jsonPath("$.classification").value("asset"))
                 .andExpect(jsonPath("$.currency").value("USD"))
@@ -103,6 +107,8 @@ class FinancialAccountApiIT {
         assertThat(saved.getOpeningBalance()).isEqualByComparingTo(new BigDecimal("1250.75"));
         assertThat(saved.getInterestRate()).isEqualByComparingTo(new BigDecimal("4.250000"));
         assertThat(saved.getInterestRateType()).isEqualTo(InterestRateType.APY);
+        assertThat(saved.getInstitutionName()).isEqualTo("Example Bank");
+        assertThat(saved.getAccountNumberLastFour()).isEqualTo("1234");
         assertThat(saved.getCreatedAt()).isNotNull();
         assertThat(saved.getUpdatedAt()).isNotNull();
     }
@@ -189,6 +195,47 @@ class FinancialAccountApiIT {
                 .andExpect(jsonPath("$.fieldErrors.currency").exists())
                 .andExpect(jsonPath("$.fieldErrors.openingDate").exists())
                 .andExpect(jsonPath("$.fieldErrors.openingBalance").exists());
+
+        assertThat(repository.count()).isZero();
+    }
+
+    @Test
+    void rejectsInvalidSafeIdentificationMetadata() throws Exception {
+        mockMvc.perform(post("/api/v1/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Everyday Checking",
+                                  "type": "checking",
+                                  "currency": "USD",
+                                  "openingDate": "2026-08-20",
+                                  "institutionName": " ",
+                                  "accountNumberLastFour": "12A4"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.institutionName").exists())
+                .andExpect(jsonPath("$.fieldErrors.accountNumberLastFour")
+                        .value("must contain exactly four digits"));
+
+        assertThat(repository.count()).isZero();
+    }
+
+    @Test
+    void rejectsAFullAccountNumberFieldInsteadOfSilentlyIgnoringIt() throws Exception {
+        mockMvc.perform(post("/api/v1/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Everyday Checking",
+                                  "type": "checking",
+                                  "currency": "USD",
+                                  "openingDate": "2026-08-20",
+                                  "accountNumber": "1234567890121234"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Request body is malformed"));
 
         assertThat(repository.count()).isZero();
     }
@@ -299,6 +346,40 @@ class FinancialAccountApiIT {
     }
 
     @Test
+    void findsOnlyActiveOwnedAccountsWithTheSameNormalizedName() throws Exception {
+        UUID activeAccountId = createAccount("Everyday Checking", "checking");
+        UUID archivedAccountId = createAccount("everyday checking", "savings");
+        mockMvc.perform(post("/api/v1/accounts/{accountId}/archive", archivedAccountId))
+                .andExpect(status().isOk());
+
+        UUID otherOwnerId = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO app_user (id, display_name) VALUES (?, ?)", otherOwnerId, "Other User");
+        repository.saveAndFlush(new FinancialAccount(
+                UUID.randomUUID(), otherOwnerId, "EVERYDAY CHECKING", AccountType.CASH, "USD",
+                java.time.LocalDate.of(2026, 8, 20), BigDecimal.ZERO
+        ));
+
+        mockMvc.perform(get("/api/v1/accounts/name-matches")
+                        .queryParam("name", " Everyday CHECKING "))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(activeAccountId.toString()))
+                .andExpect(jsonPath("$[0].status").value("active"));
+    }
+
+    @Test
+    void validatesTheDuplicateNameLookup() throws Exception {
+        mockMvc.perform(get("/api/v1/accounts/name-matches").queryParam("name", " "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.name").exists());
+
+        mockMvc.perform(get("/api/v1/accounts/name-matches")
+                        .queryParam("name", "a".repeat(101)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.name").exists());
+    }
+
+    @Test
     void updatesEditableAccountFields() throws Exception {
         UUID accountId = createAccount("Everyday Checking", "checking");
 
@@ -320,6 +401,32 @@ class FinancialAccountApiIT {
                 .andExpect(jsonPath("$.openingDate").value("2026-08-01"))
                 .andExpect(jsonPath("$.openingBalance").value(1500.50))
                 .andExpect(jsonPath("$.currentBalance").value(1500.50));
+    }
+
+    @Test
+    void updatesAndClearsSafeIdentificationMetadata() throws Exception {
+        UUID accountId = createAccount("Everyday Checking", "checking");
+
+        mockMvc.perform(patch("/api/v1/accounts/{accountId}", accountId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "institutionName": " Example Credit Union ",
+                                  "accountNumberLastFour": "4321"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.institutionName").value("Example Credit Union"))
+                .andExpect(jsonPath("$.accountNumberLastFour").value("4321"));
+
+        mockMvc.perform(patch("/api/v1/accounts/{accountId}", accountId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"institutionName": null, "accountNumberLastFour": null}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.institutionName").isEmpty())
+                .andExpect(jsonPath("$.accountNumberLastFour").isEmpty());
     }
 
     @Test

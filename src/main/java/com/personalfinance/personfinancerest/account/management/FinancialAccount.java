@@ -28,6 +28,15 @@ public class FinancialAccount {
     @Column(nullable = false, length = 100)
     private String name;
 
+    @Column(name = "normalized_name", nullable = false, length = 100)
+    private String normalizedName;
+
+    @Column(name = "institution_name", length = 100)
+    private String institutionName;
+
+    @Column(name = "account_number_last_four", length = 4)
+    private String accountNumberLastFour;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private AccountType type;
@@ -71,9 +80,17 @@ public class FinancialAccount {
     public FinancialAccount(UUID id, UUID ownerId, String name, AccountType type, String currency,
                             LocalDate openingDate, BigDecimal openingBalance,
                             BigDecimal interestRate, InterestRateType interestRateType) {
+        this(id, ownerId, name, type, currency, openingDate, openingBalance,
+                interestRate, interestRateType, null, null);
+    }
+
+    public FinancialAccount(UUID id, UUID ownerId, String name, AccountType type, String currency,
+                            LocalDate openingDate, BigDecimal openingBalance,
+                            BigDecimal interestRate, InterestRateType interestRateType,
+                            String institutionName, String accountNumberLastFour) {
         this.id = id;
         this.ownerId = ownerId;
-        this.name = name;
+        rename(name);
         this.type = type;
         this.currency = currency;
         this.openingDate = openingDate;
@@ -81,6 +98,8 @@ public class FinancialAccount {
         this.currentBalance = openingBalance;
         this.interestRate = interestRate;
         this.interestRateType = interestRateType;
+        this.institutionName = AccountNames.optionalDisplayName(institutionName);
+        this.accountNumberLastFour = accountNumberLastFour;
     }
 
     @PrePersist
@@ -105,6 +124,18 @@ public class FinancialAccount {
 
     public String getName() {
         return name;
+    }
+
+    String getNormalizedName() {
+        return normalizedName;
+    }
+
+    public String getInstitutionName() {
+        return institutionName;
+    }
+
+    public String getAccountNumberLastFour() {
+        return accountNumberLastFour;
     }
 
     public AccountType getType() {
@@ -158,13 +189,28 @@ public class FinancialAccount {
     void update(String name, AccountType type, String currency, LocalDate openingDate,
                 BigDecimal openingBalance, BigDecimal interestRate,
                 InterestRateType interestRateType) {
-        this.name = name;
+        update(name, type, currency, openingDate, openingBalance, interestRate, interestRateType,
+                institutionName, accountNumberLastFour);
+    }
+
+    void update(String name, AccountType type, String currency, LocalDate openingDate,
+                BigDecimal openingBalance, BigDecimal interestRate,
+                InterestRateType interestRateType, String institutionName,
+                String accountNumberLastFour) {
+        rename(name);
         this.type = type;
         this.currency = currency;
         this.openingDate = openingDate;
         this.openingBalance = openingBalance;
         this.interestRate = interestRate;
         this.interestRateType = interestRateType;
+        this.institutionName = AccountNames.optionalDisplayName(institutionName);
+        this.accountNumberLastFour = accountNumberLastFour;
+    }
+
+    private void rename(String name) {
+        this.name = AccountNames.displayName(name);
+        this.normalizedName = AccountNames.normalizedName(name);
     }
 
     void archive(Instant archivedAt) {

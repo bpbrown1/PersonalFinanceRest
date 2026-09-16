@@ -28,9 +28,16 @@ public final class UpdateFinancialAccountRequest {
     @Digits(integer = 3, fraction = 6)
     private BigDecimal interestRate;
     private InterestRateType interestRateType;
+    @Pattern(regexp = "(?s).*\\S.*", message = "must not be blank")
+    @Size(max = 100)
+    private String institutionName;
+    @Pattern(regexp = "\\d{4}", message = "must contain exactly four digits")
+    private String accountNumberLastFour;
 
     private boolean interestRateFieldPresent;
     private boolean interestRateTypeFieldPresent;
+    private boolean institutionNameFieldPresent;
+    private boolean accountNumberLastFourFieldPresent;
 
     public UpdateFinancialAccountRequest() {
     }
@@ -68,6 +75,10 @@ public final class UpdateFinancialAccountRequest {
 
     public InterestRateType interestRateType() { return interestRateType; }
 
+    public String institutionName() { return institutionName; }
+
+    public String accountNumberLastFour() { return accountNumberLastFour; }
+
     public void setName(String name) { this.name = name; }
 
     public void setType(AccountType type) { this.type = type; }
@@ -88,16 +99,31 @@ public final class UpdateFinancialAccountRequest {
         this.interestRateTypeFieldPresent = true;
     }
 
+    public void setInstitutionName(String institutionName) {
+        this.institutionName = institutionName;
+        this.institutionNameFieldPresent = true;
+    }
+
+    public void setAccountNumberLastFour(String accountNumberLastFour) {
+        this.accountNumberLastFour = accountNumberLastFour;
+        this.accountNumberLastFourFieldPresent = true;
+    }
+
     @JsonIgnore
     @AssertTrue(message = "must include at least one field to update")
     public boolean isAnyFieldPresent() {
         return name != null || type != null || currency != null || openingDate != null || openingBalance != null
-                || interestRateFieldPresent || interestRateTypeFieldPresent;
+                || interestRateFieldPresent || interestRateTypeFieldPresent
+                || institutionNameFieldPresent || accountNumberLastFourFieldPresent;
     }
 
     boolean hasInterestRateField() { return interestRateFieldPresent; }
 
     boolean hasInterestRateTypeField() { return interestRateTypeFieldPresent; }
+
+    boolean hasInstitutionNameField() { return institutionNameFieldPresent; }
+
+    boolean hasAccountNumberLastFourField() { return accountNumberLastFourFieldPresent; }
 
     boolean changesFinancialTerms() {
         return currency != null || openingDate != null || openingBalance != null;

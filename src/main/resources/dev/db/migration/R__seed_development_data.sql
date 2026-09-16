@@ -2,22 +2,31 @@
 -- This location is enabled only by the dev Spring profile.
 
 MERGE INTO financial_account (
-    id, owner_id, name, type, currency, opening_date, opening_balance, current_balance,
+    id, owner_id, name, normalized_name, institution_name, account_number_last_four,
+    type, currency, opening_date, opening_balance, current_balance,
     interest_rate, interest_rate_type, created_at, updated_at, archived_at
 ) KEY (id) VALUES
     ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001',
-     'Everyday Checking', 'CHECKING', 'USD', DATEADD('DAY', -120, CURRENT_DATE),
+     'Everyday Checking', 'everyday checking', 'Example Bank', '1234',
+     'CHECKING', 'USD', DATEADD('DAY', -120, CURRENT_DATE),
      2500.00, 5026.35, 0.010000, 'APY', DATEADD('DAY', -120, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, NULL),
     ('10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001',
-     'Emergency Savings', 'SAVINGS', 'USD', DATEADD('DAY', -180, CURRENT_DATE),
+     'Emergency Savings', 'emergency savings', 'Example Bank', '5678',
+     'SAVINGS', 'USD', DATEADD('DAY', -180, CURRENT_DATE),
      10000.00, 10618.25, 4.250000, 'APY', DATEADD('DAY', -180, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, NULL),
     ('10000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001',
-     'Euro Travel Cash', 'CASH', 'EUR', DATEADD('DAY', -60, CURRENT_DATE),
+     'Euro Travel Cash', 'euro travel cash', NULL, NULL,
+     'CASH', 'EUR', DATEADD('DAY', -60, CURRENT_DATE),
      500.00, 549.25, NULL, NULL, DATEADD('DAY', -60, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, NULL),
     ('10000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000001',
-     'Previous Credit Card', 'CREDIT_CARD', 'USD', DATEADD('DAY', -365, CURRENT_DATE),
+     'Previous Credit Card', 'previous credit card', 'Example Card Services', '9012',
+     'CREDIT_CARD', 'USD', DATEADD('DAY', -365, CURRENT_DATE),
      0.00, 0.00, 24.990000, 'APR', DATEADD('DAY', -365, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP,
-     DATEADD('DAY', -30, CURRENT_TIMESTAMP));
+     DATEADD('DAY', -30, CURRENT_TIMESTAMP)),
+    ('10000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001',
+     'Everyday Checking', 'everyday checking', 'Example Credit Union', '4321',
+     'CHECKING', 'USD', DATEADD('DAY', -45, CURRENT_DATE),
+     850.00, 850.00, NULL, NULL, DATEADD('DAY', -45, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, NULL);
 
 MERGE INTO account_balance_snapshot (
     id, account_id, balance, effective_at, source, created_at
@@ -37,7 +46,10 @@ MERGE INTO account_balance_snapshot (
      'OPENING', DATEADD('DAY', -60, CURRENT_TIMESTAMP)),
     ('20000000-0000-0000-0000-000000000006', '10000000-0000-0000-0000-000000000004',
      0.00, CAST(DATEADD('DAY', -365, CURRENT_DATE) AS TIMESTAMP) AT TIME ZONE 'UTC',
-     'OPENING', DATEADD('DAY', -365, CURRENT_TIMESTAMP));
+     'OPENING', DATEADD('DAY', -365, CURRENT_TIMESTAMP)),
+    ('20000000-0000-0000-0000-000000000007', '10000000-0000-0000-0000-000000000005',
+     850.00, CAST(DATEADD('DAY', -45, CURRENT_DATE) AS TIMESTAMP) AT TIME ZONE 'UTC',
+     'OPENING', DATEADD('DAY', -45, CURRENT_TIMESTAMP));
 
 MERGE INTO transaction_category (
     id, owner_id, name, normalized_name, active_name_key, applicability,

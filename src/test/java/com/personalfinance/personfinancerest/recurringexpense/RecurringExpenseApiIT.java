@@ -421,9 +421,9 @@ class RecurringExpenseApiIT {
         UUID id = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO financial_account
-                (id, owner_id, name, type, currency, opening_date, opening_balance, current_balance,
+                (id, owner_id, name, normalized_name, type, currency, opening_date, opening_balance, current_balance,
                  created_at, updated_at, archived_at)
-                VALUES (?, ?, 'Account', 'CHECKING', ?, DATE '2026-01-01', 0, 0,
+                VALUES (?, ?, 'Account', 'account', 'CHECKING', ?, DATE '2026-01-01', 0, 0,
                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
                 """, id, accountOwner, currency);
         return id;

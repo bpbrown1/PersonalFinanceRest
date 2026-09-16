@@ -19,6 +19,10 @@ public interface FinancialAccountRepository extends JpaRepository<FinancialAccou
 
     List<FinancialAccount> findAllByOwnerIdAndArchivedAtIsNotNullOrderByCreatedAtAsc(UUID ownerId);
 
+    List<FinancialAccount> findAllByOwnerIdAndArchivedAtIsNullAndNormalizedNameOrderByCreatedAtAsc(
+            UUID ownerId, String normalizedName
+    );
+
     Optional<FinancialAccount> findByIdAndOwnerId(UUID id, UUID ownerId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
