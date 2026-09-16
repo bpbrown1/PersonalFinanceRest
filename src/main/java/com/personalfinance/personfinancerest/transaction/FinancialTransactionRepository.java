@@ -54,4 +54,20 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
     );
 
     boolean existsByAccountId(UUID accountId);
+
+    @Query("""
+            select entry from FinancialTransaction entry
+            where entry.ownerId = :ownerId
+              and entry.accountId = :accountId
+              and entry.deletedAt is null
+              and entry.transactionDate <= :statementDate
+            order by entry.transactionDate, entry.createdAt, entry.id
+            """)
+    List<FinancialTransaction> findActiveLedgerAsOf(
+            @Param("ownerId") UUID ownerId,
+            @Param("accountId") UUID accountId,
+            @Param("statementDate") LocalDate statementDate
+    );
+
+    Optional<FinancialTransaction> findByReconciliationId(UUID reconciliationId);
 }

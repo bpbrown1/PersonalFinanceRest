@@ -45,12 +45,19 @@ public class FinancialTransaction {
     @Column(name = "transfer_id")
     private UUID transferId;
 
+    @Column(name = "reconciliation_id")
+    private UUID reconciliationId;
+
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private TransactionType type;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private TransactionProvenance provenance;
 
     @Column(name = "transaction_date", nullable = false)
     private LocalDate transactionDate;
@@ -86,10 +93,32 @@ public class FinancialTransaction {
     FinancialTransaction(UUID id, UUID ownerId, UUID accountId, UUID categoryId, BigDecimal amount,
                          TransactionType type, LocalDate transactionDate, String description,
                          String merchantPayee, String notes, String externalReference) {
+        this(id, ownerId, accountId, categoryId, amount, type, TransactionProvenance.MANUAL,
+                transactionDate, description, merchantPayee, notes, externalReference);
+    }
+
+    FinancialTransaction(UUID id, UUID ownerId, UUID accountId, UUID categoryId, BigDecimal amount,
+                         TransactionType type, TransactionProvenance provenance,
+                         LocalDate transactionDate, String description,
+                         String merchantPayee, String notes, String externalReference) {
         this.id = id;
         this.ownerId = ownerId;
+        this.provenance = provenance;
         replace(accountId, categoryId, amount, type, transactionDate, description,
                 merchantPayee, notes, externalReference);
+    }
+
+    public static FinancialTransaction reconciliationAdjustment(
+            UUID id, UUID reconciliationId, UUID ownerId, UUID accountId, UUID categoryId,
+            BigDecimal amount, TransactionType type, LocalDate transactionDate,
+            String description, String notes) {
+        FinancialTransaction transaction = new FinancialTransaction(
+                id, ownerId, accountId, categoryId, amount, type,
+                TransactionProvenance.RECONCILIATION, transactionDate, description,
+                null, notes, null
+        );
+        transaction.reconciliationId = reconciliationId;
+        return transaction;
     }
 
     static FinancialTransaction transferLeg(UUID id, UUID transferId, UUID ownerId, UUID accountId,
@@ -184,7 +213,7 @@ public class FinancialTransaction {
         deletedAt = null;
     }
 
-    BigDecimal balanceImpact() {
+    public BigDecimal balanceImpact() {
         return type.balanceImpact(amount);
     }
 
@@ -215,12 +244,20 @@ public class FinancialTransaction {
         return transferId;
     }
 
+    public UUID getReconciliationId() {
+        return reconciliationId;
+    }
+
     public BigDecimal getAmount() {
         return amount;
     }
 
     public TransactionType getType() {
         return type;
+    }
+
+    public TransactionProvenance getProvenance() {
+        return provenance;
     }
 
     public LocalDate getTransactionDate() {
