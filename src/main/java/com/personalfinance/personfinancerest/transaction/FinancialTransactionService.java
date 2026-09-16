@@ -62,6 +62,11 @@ class FinancialTransactionService {
     @Transactional
     TransactionResponse create(CreateTransactionRequest request) {
         ensureStandaloneType(request.type());
+        if (request.provenance() == TransactionProvenance.RECONCILIATION) {
+            throw new TransactionConflictException(
+                    "Reconciliation transactions must be created through the reconciliation endpoint"
+            );
+        }
         UUID ownerId = currentUserProvider.userId();
         FinancialAccount account = lockOwnedAccounts(ownerId, Set.of(request.accountId())).get(request.accountId());
         ensureActiveAccount(account);
@@ -76,7 +81,7 @@ class FinancialTransactionService {
 
         FinancialTransaction transaction = new FinancialTransaction(
                 UUID.randomUUID(), ownerId, request.accountId(), splits.isEmpty() ? request.categoryId() : null,
-                amount, request.type(), request.transactionDate(),
+                amount, request.type(), request.provenance(), request.transactionDate(),
                 request.description(), request.merchantPayee(), request.notes(), request.externalReference()
         );
         transaction.replaceSplits(splits);
@@ -245,6 +250,11 @@ class FinancialTransactionService {
     private void ensureStandaloneTransaction(FinancialTransaction transaction) {
         if (transaction.getTransferId() != null) {
             throw new TransactionConflictException("Transfer legs must be managed through /api/v1/transfers");
+        }
+        if (transaction.getProvenance() == TransactionProvenance.RECONCILIATION) {
+            throw new TransactionConflictException(
+                    "Reconciliation adjustments are immutable; create a new reconciliation instead"
+            );
         }
     }
 
