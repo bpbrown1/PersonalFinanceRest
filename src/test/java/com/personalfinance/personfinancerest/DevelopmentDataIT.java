@@ -29,7 +29,7 @@ class DevelopmentDataIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(5))
                 .andExpect(jsonPath("$[?(@.name == 'Everyday Checking')].currentBalance")
-                        .value(org.hamcrest.Matchers.containsInAnyOrder(5026.35, 850.0)))
+                        .value(org.hamcrest.Matchers.containsInAnyOrder(4814.36, 850.0)))
                 .andExpect(jsonPath("$[?(@.name == 'Everyday Checking')].institutionName")
                         .value(org.hamcrest.Matchers.containsInAnyOrder("Example Bank", "Example Credit Union")))
                 .andExpect(jsonPath("$[?(@.name == 'Everyday Checking')].accountNumberLastFour")
@@ -69,6 +69,8 @@ class DevelopmentDataIT {
                 .andExpect(jsonPath("$.items.length()").value(14))
                 .andExpect(jsonPath("$.items[?(@.description == 'Weekly groceries')].splits[0].amount")
                         .value(org.hamcrest.Matchers.contains(100.0)))
+                .andExpect(jsonPath("$.items[?(@.description == 'Savings interest')].provenance")
+                        .value(org.hamcrest.Matchers.contains("imported")))
                 .andExpect(jsonPath("$.totalElements").value(14))
                 .andExpect(jsonPath("$.items[?(@.description == 'August home internet')]"
                                 + ".recurringExpenseOccurrence.occurrenceKey")

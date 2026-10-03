@@ -46,9 +46,6 @@ class AccountBalanceService {
                 BalanceSnapshotSource.MANUAL
         ));
 
-        BalanceSnapshot latestSnapshot = latestSnapshot(accountId, Instant.now());
-        account.recordCurrentBalance(latestSnapshot.getBalance());
-        accountRepository.saveAndFlush(account);
         return BalanceSnapshotResponse.from(snapshot);
     }
 

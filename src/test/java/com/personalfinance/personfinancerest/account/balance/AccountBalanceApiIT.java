@@ -81,7 +81,7 @@ class AccountBalanceApiIT {
         mockMvc.perform(get("/api/v1/accounts/{accountId}", accountId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.openingBalance").value(1250.75))
-                .andExpect(jsonPath("$.currentBalance").value(1800.00));
+                .andExpect(jsonPath("$.currentBalance").value(1250.75));
 
         mockMvc.perform(get("/api/v1/accounts/{accountId}/balance-snapshots", accountId))
                 .andExpect(status().isOk())

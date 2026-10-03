@@ -59,16 +59,12 @@ class AccountBalanceServiceTest {
     }
 
     @Test
-    void recordsAnAppendOnlySnapshotAndUpdatesCurrentBalanceFromTheLatestSnapshot() {
+    void recordsAnAppendOnlySnapshotWithoutOverwritingTheLedgerBalance() {
         Instant effectiveAt = Instant.parse("2026-08-21T12:00:00Z");
-        BalanceSnapshot latest = snapshot(new BigDecimal("1500.00"), effectiveAt);
         givenOwnedAccount();
         given(snapshotRepository.existsByAccountIdAndEffectiveAt(accountId, effectiveAt)).willReturn(false);
         given(snapshotRepository.saveAndFlush(any(BalanceSnapshot.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
-        given(snapshotRepository.findFirstByAccountIdAndEffectiveAtLessThanEqualOrderByEffectiveAtDesc(
-                any(UUID.class), any(Instant.class))).willReturn(Optional.of(latest));
-        given(accountRepository.saveAndFlush(account)).willReturn(account);
 
         BalanceSnapshotResponse response = service.create(
                 accountId,
@@ -77,29 +73,22 @@ class AccountBalanceServiceTest {
 
         assertThat(response.balance()).isEqualByComparingTo("1500.00");
         assertThat(response.source()).isEqualTo(BalanceSnapshotSource.MANUAL);
-        assertThat(account.getCurrentBalance()).isEqualByComparingTo("1500.00");
+        assertThat(account.getCurrentBalance()).isEqualByComparingTo("1250.75");
     }
 
     @Test
-    void aBackdatedSnapshotDoesNotReplaceTheLatestCurrentBalance() {
+    void aBackdatedSnapshotAlsoLeavesTheLedgerBalanceUnchanged() {
         Instant backdatedAt = Instant.parse("2026-08-20T12:00:00Z");
-        BalanceSnapshot latest = snapshot(
-                new BigDecimal("1800.00"),
-                Instant.parse("2026-08-21T12:00:00Z")
-        );
         givenOwnedAccount();
         given(snapshotRepository.saveAndFlush(any(BalanceSnapshot.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
-        given(snapshotRepository.findFirstByAccountIdAndEffectiveAtLessThanEqualOrderByEffectiveAtDesc(
-                any(UUID.class), any(Instant.class))).willReturn(Optional.of(latest));
-        given(accountRepository.saveAndFlush(account)).willReturn(account);
 
         service.create(
                 accountId,
                 new CreateBalanceSnapshotRequest(new BigDecimal("1300.00"), backdatedAt)
         );
 
-        assertThat(account.getCurrentBalance()).isEqualByComparingTo("1800.00");
+        assertThat(account.getCurrentBalance()).isEqualByComparingTo("1250.75");
     }
 
     @Test

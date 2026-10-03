@@ -310,7 +310,40 @@ Retrieve active transaction totals grouped by account currency with:
 
 `income` and `spending` are fixed-decimal totals, and `netImpact` is income minus spending. Negative expense refunds reduce `spending`, which may become negative when credits exceed purchases. Date boundaries are inclusive. Either boundary may be omitted for an open-ended range; omitting both returns an all-time summary. Optional `accountId`, `categoryId`, and `type` filters match the paged ledger semantics. A category filter matches either an unsplit parent category or an individual split row; split amounts are aggregated without also counting the parent amount. `transactionCount` remains the distinct number of matching transactions. Only active income and expense transactions owned by the current user are included; transfer legs are excluded from every total and from `transactionCount`. Results are ordered by currency, and a range with no qualifying activity returns an empty array. A `from` date after `to` returns `400 Validation failed` with a `dateRange` field error.
 
-Balance snapshots and transaction-driven balance changes currently share the account's `currentBalance` projection. A newly effective snapshot sets the observed balance; subsequent transaction changes apply deltas. Full automatic reconciliation between the ledger and observed snapshots is intentionally deferred to the dedicated reconciliation story.
+Balance snapshots are append-only observations and never overwrite the account's authoritative `currentBalance`. The authoritative projection is the opening balance plus active posted ledger activity. APR/APY metadata never creates activity automatically; institution-posted interest, charges, fees, payments, and reconciliation corrections are explicit transactions.
+
+### Transaction provenance and account reconciliation
+
+Transaction responses expose immutable `provenance` as `manual`, `imported`, or `reconciliation`. Ordinary `POST /api/v1/transactions` requests may omit provenance to default to `manual`, or explicitly select `manual` or `imported`. The `reconciliation` value is reserved for confirmed reconciliation adjustments and is rejected on the ordinary transaction endpoint. Reconciliation adjustments expose their `reconciliationId` and cannot be edited, deleted, or restored through the normal transaction lifecycle.
+
+Preview an owned active account against an inclusive statement date without changing data:
+
+`POST /api/v1/accounts/{accountId}/reconciliations/preview`
+
+```json
+{
+  "statementDate": "2026-08-31",
+  "statementBalance": 130.00
+}
+```
+
+The response includes the account currency, statement balance, opening-balance-plus-ledger `calculatedBalance`, signed `difference`, required adjustment type, contributing transaction count, and an opaque `ledgerToken`. Active transactions after the statement date are excluded. All monetary inputs and results use exact two-decimal arithmetic; values requiring rounding are rejected rather than rounded.
+
+Confirm the reviewed preview with `POST /api/v1/accounts/{accountId}/reconciliations`, an `Idempotency-Key` header, and:
+
+```json
+{
+  "statementDate": "2026-08-31",
+  "statementBalance": 130.00,
+  "ledgerToken": "preview-token",
+  "categoryId": "30000000-0000-0000-0000-000000000002",
+  "explanation": "Statement includes posted interest not present in the ledger"
+}
+```
+
+Confirmation locks the account, recalculates its as-of ledger state, and returns `409` if the preview became stale. A nonzero difference requires an active category compatible with the derived income or expense adjustment and a nonblank explanation. It creates exactly one protected transaction plus a durable reconciliation record. Repeating the same request and idempotency key returns the original identities without duplicating either record; reusing the key for a different statement returns `409`. A zero difference creates a reconciliation record but no transaction and does not require a category or explanation.
+
+`GET /api/v1/accounts/{accountId}/reconciliations?page=0&size=25` returns newest-first reconciliation history with statement balance, calculated balance, difference, token, explanation, and resulting transaction identity. Page sizes must be between 1 and 100.
 
 ## Recurring expense contract
 

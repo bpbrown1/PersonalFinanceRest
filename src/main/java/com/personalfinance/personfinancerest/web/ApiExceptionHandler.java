@@ -8,6 +8,8 @@ import com.personalfinance.personfinancerest.account.management.FinancialAccount
 import com.personalfinance.personfinancerest.account.management.FinancialAccountNotFoundException;
 import com.personalfinance.personfinancerest.account.management.InvalidAccountStatusException;
 import com.personalfinance.personfinancerest.account.management.InvalidFinancialAccountRequestException;
+import com.personalfinance.personfinancerest.account.reconciliation.InvalidReconciliationRequestException;
+import com.personalfinance.personfinancerest.account.reconciliation.ReconciliationConflictException;
 import com.personalfinance.personfinancerest.category.CategoryNotFoundException;
 import com.personalfinance.personfinancerest.category.CategoryHierarchyConflictException;
 import com.personalfinance.personfinancerest.category.DuplicateCategoryNameException;
@@ -43,6 +45,20 @@ import java.util.Map;
 
 @RestControllerAdvice
 class ApiExceptionHandler {
+
+    @ExceptionHandler(ReconciliationConflictException.class)
+    ResponseEntity<ApiError> handleReconciliationConflict(ReconciliationConflictException exception) {
+        ApiError response = new ApiError(
+                Instant.now(), HttpStatus.CONFLICT.value(), exception.getMessage(), Map.of()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler(InvalidReconciliationRequestException.class)
+    ResponseEntity<ApiError> handleInvalidReconciliationRequest(
+            InvalidReconciliationRequestException exception) {
+        return badRequest("Validation failed", exception.getFieldErrors());
+    }
 
     @ExceptionHandler({BalanceSnapshotConflictException.class, ArchivedFinancialAccountException.class})
     ResponseEntity<ApiError> handleBalanceConflict(RuntimeException exception) {

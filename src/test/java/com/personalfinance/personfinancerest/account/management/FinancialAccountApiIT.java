@@ -499,7 +499,7 @@ class FinancialAccountApiIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.interestRate").value(3.5))
                 .andExpect(jsonPath("$.interestRateType").value("apy"))
-                .andExpect(jsonPath("$.currentBalance").value(1800.0));
+                .andExpect(jsonPath("$.currentBalance").value(0.0));
 
         mockMvc.perform(patch("/api/v1/accounts/{accountId}", accountId)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -507,7 +507,7 @@ class FinancialAccountApiIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.interestRate").isEmpty())
                 .andExpect(jsonPath("$.interestRateType").isEmpty())
-                .andExpect(jsonPath("$.currentBalance").value(1800.0));
+                .andExpect(jsonPath("$.currentBalance").value(0.0));
     }
 
     @Test

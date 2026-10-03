@@ -19,6 +19,7 @@ public record CreateTransactionRequest(
         @NotNull LocalDate transactionDate,
         @NotBlank @Size(max = 255) String description,
         @NotNull TransactionType type,
+        TransactionProvenance provenance,
         UUID categoryId,
         List<@Valid TransactionSplitRequest> splits,
         @Size(max = 255) String merchantPayee,
@@ -26,11 +27,16 @@ public record CreateTransactionRequest(
         @Size(max = 255) String externalReference,
         @Valid RecurringExpenseOccurrenceSelection recurringExpenseOccurrence
 ) {
+    public CreateTransactionRequest {
+        provenance = provenance == null ? TransactionProvenance.MANUAL : provenance;
+    }
+
     public CreateTransactionRequest(
             UUID accountId, BigDecimal amount, LocalDate transactionDate, String description,
             TransactionType type, UUID categoryId, List<TransactionSplitRequest> splits,
             String merchantPayee, String notes, String externalReference) {
-        this(accountId, amount, transactionDate, description, type, categoryId, splits,
+        this(accountId, amount, transactionDate, description, type, TransactionProvenance.MANUAL,
+                categoryId, splits,
                 merchantPayee, notes, externalReference, null);
     }
 }
